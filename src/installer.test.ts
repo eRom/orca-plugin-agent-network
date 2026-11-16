@@ -1,6 +1,6 @@
 // Joue l'installateur sur de vrais dossiers temporaires (HOME factice) : jamais le vrai HOME.
 import { createHash } from 'node:crypto'
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, assert, test } from 'orca/testing'
@@ -20,15 +20,28 @@ const SKILL_B = '---\nname: agent-network\n---\nVersion B\n'
 
 const sha = (text: string): string => createHash('sha256').update(text).digest('hex')
 
-/** Registre en mémoire qui sérialise en JSON à chaque `save`, comme le stockage d'Orca. */
-function memoryStore(initialJson: string | null = null): { store: LedgerStore; json: () => string | null } {
+/**
+ * Registre en mémoire qui sérialise en JSON à chaque `save`, comme le stockage d'Orca.
+ * `failSaveAfter` : nombre de sauvegardes réussies avant que les suivantes lèvent une erreur.
+ * `slow` : cède la main à chaque accès, pour que deux opérations concurrentes s'entrelacent vraiment.
+ */
+function memoryStore(
+  initialJson: string | null = null,
+  options: { failSaveAfter?: number; slow?: boolean } = {}
+): { store: LedgerStore; json: () => string | null } {
   let json = initialJson
+  let saves = 0
+  const yieldTurn = () => (options.slow ? new Promise((resolve) => setTimeout(resolve, 2)) : Promise.resolve())
   return {
     store: {
       async load(): Promise<Ledger> {
+        await yieldTurn()
         return json === null ? { version: 1, entries: [] } : (JSON.parse(json) as Ledger)
       },
       async save(ledger: Ledger): Promise<void> {
+        await yieldTurn()
+        saves += 1
+        if (options.failSaveAfter !== undefined && saves > options.failSaveAfter) throw new Error('storage down')
         json = JSON.stringify(ledger)
       }
     },
@@ -335,4 +348,167 @@ test('never removes a ledger entry file outside its own target', async () => {
   const uninstall = await uninstallSkill(home, nodeFileSystem(), forged.store)
   assert.equal(resultOf(uninstall.results, 'claude').outcome, 'failed')
   assert.equal(await readFile(victim, 'utf8'), 'keep me\n')
+})
+
+// --- Fix round 1 -----------------------------------------------------------------------------------------------
+
+test('I-1: a skills folder turned into a symlink after install is never followed, and uninstall is not stuck', async () => {
+  const home = await makeHome('.claude')
+  const outside = await makeOutside()
+  const { store } = memoryStore()
+  await installSkill(home, SKILL_A, nodeFileSystem(), store)
+  const moved = join(outside, 'skills')
+  await rename(join(home, '.claude', 'skills'), moved)
+  await symlink(moved, join(home, '.claude', 'skills'))
+  const outsideBefore = await snapshot(outside)
+
+  const status = await readStatus(home, SKILL_A, nodeFileSystem(), store)
+  assert.equal(status.find((item) => item.target === 'claude')?.state, 'foreign')
+  for (let round = 0; round < 2; round += 1) {
+    const uninstall = await uninstallSkill(home, nodeFileSystem(), store)
+    assert.equal(resultOf(uninstall.results, 'claude').outcome, 'kept-modified')
+    assert.deepEqual(await snapshot(outside), outsideBefore)
+    assert.equal((await store.load()).entries.length, 1)
+  }
+  const reinstall = await installSkill(home, SKILL_B, nodeFileSystem(), store)
+  assert.equal(resultOf(reinstall.results, 'claude').outcome, 'skipped-foreign')
+  assert.deepEqual(await snapshot(outside), outsideBefore)
+})
+
+test('I-1: a created ancestor folder turned into a symlink is never followed', async () => {
+  const home = await makeHome('.codex')
+  const outside = await makeOutside()
+  const { store } = memoryStore()
+  await installSkill(home, SKILL_A, nodeFileSystem(), store)
+  const moved = join(outside, 'agents')
+  await rename(join(home, '.agents'), moved)
+  await symlink(moved, join(home, '.agents'))
+  const outsideBefore = await snapshot(outside)
+
+  const uninstall = await uninstallSkill(home, nodeFileSystem(), store)
+  assert.equal(resultOf(uninstall.results, 'shared').outcome, 'kept-modified')
+  assert.deepEqual(await snapshot(outside), outsideBefore)
+  assert.equal((await store.load()).entries.length, 1)
+})
+
+test('I-1: removeEmptyDir treats a symlink or a file in place of a folder as not removable', async () => {
+  const root = await makeOutside()
+  const real = join(root, 'real')
+  await mkdir(real)
+  await symlink(real, join(root, 'link'))
+  await writeFile(join(root, 'file'), 'x', 'utf8')
+  const fs = nodeFileSystem()
+  assert.equal(await fs.removeEmptyDir(join(root, 'link')), false)
+  assert.equal(await fs.removeEmptyDir(join(root, 'file', 'below')), false)
+  assert.equal(await fs.removeEmptyDir(real), true)
+})
+
+test('I-2: two concurrent installs end with a complete ledger and every file installed', async () => {
+  const home = await makeHome('.claude', '.grok')
+  const { store } = memoryStore(null, { slow: true })
+  await Promise.all([
+    installSkill(home, SKILL_A, nodeFileSystem(), store),
+    installSkill(home, SKILL_A, nodeFileSystem(), store)
+  ])
+  assert.equal((await store.load()).entries.length, 2)
+  const status = await readStatus(home, SKILL_A, nodeFileSystem(), store)
+  assert.deepEqual(
+    status.map((item) => item.state),
+    ['installed', 'absent-harness', 'installed', 'absent-harness']
+  )
+})
+
+test('I-2: a failing operation does not break the queue', async () => {
+  const home = await makeHome('.claude')
+  const broken: LedgerStore = {
+    async load() {
+      throw new Error('storage unreadable')
+    },
+    async save() {}
+  }
+  const { store } = memoryStore()
+  const [first, second] = await Promise.allSettled([
+    installSkill(home, SKILL_A, nodeFileSystem(), broken),
+    installSkill(home, SKILL_A, nodeFileSystem(), store)
+  ])
+  assert.equal(first.status, 'rejected')
+  assert.equal(second.status, 'fulfilled')
+  assert.equal((await store.load()).entries.length, 1)
+})
+
+test('M-1: forged createdDirs outside HOME, or not above the file, are ignored and never deleted', async () => {
+  const home = await makeHome('.claude', 'unrelated-empty')
+  const outside = await makeOutside()
+  const victim = join(outside, 'victim-empty')
+  await mkdir(victim)
+  const first = memoryStore()
+  await installSkill(home, SKILL_A, nodeFileSystem(), first.store)
+  const ledger = JSON.parse(first.json() ?? '') as Ledger
+  ledger.entries[0].createdDirs.unshift(`${home}/../${outside.split('/').pop()}/victim-empty`, join(home, 'unrelated-empty'), home)
+  const forged = memoryStore(JSON.stringify(ledger))
+  const uninstall = await uninstallSkill(home, nodeFileSystem(), forged.store)
+  assert.equal(resultOf(uninstall.results, 'claude').outcome, 'removed')
+  assert.equal(await exists(victim), true)
+  assert.equal(await exists(join(home, 'unrelated-empty')), true)
+  assert.equal(await exists(home), true)
+})
+
+test('M-2: a failed ledger save after a fresh write removes the file and the folders created', async () => {
+  const home = await makeHome('.codex')
+  const before = await snapshot(home)
+  const { store } = memoryStore(null, { failSaveAfter: 0 })
+  const report = await installSkill(home, SKILL_A, nodeFileSystem(), store)
+  const shared = resultOf(report.results, 'shared')
+  assert.equal(shared.outcome, 'failed')
+  assert.equal(shared.error, 'storage down')
+  assert.deepEqual(await snapshot(home), before)
+})
+
+test('M-2: a failed ledger save after an update puts the previous text back, disk and ledger still agree', async () => {
+  const home = await makeHome('.claude')
+  const first = memoryStore()
+  await installSkill(home, SKILL_A, nodeFileSystem(), first.store)
+  const failing = memoryStore(first.json(), { failSaveAfter: 0 })
+  const report = await installSkill(home, SKILL_B, nodeFileSystem(), failing.store)
+  assert.equal(resultOf(report.results, 'claude').outcome, 'failed')
+  assert.equal(await readFile(fileOf(home, 'claude'), 'utf8'), SKILL_A)
+  const status = await readStatus(home, SKILL_A, nodeFileSystem(), memoryStore(first.json()).store)
+  assert.equal(status.find((item) => item.target === 'claude')?.state, 'installed')
+})
+
+test('M-3: a recorded SKILL.md replaced by a dangling symlink is foreign: nothing is created outside HOME', async () => {
+  const home = await makeHome('.claude')
+  const outside = await makeOutside()
+  const { store } = memoryStore()
+  await installSkill(home, SKILL_A, nodeFileSystem(), store)
+  const file = fileOf(home, 'claude')
+  await rm(file)
+  const dangling = join(outside, 'elsewhere.md')
+  await symlink(dangling, file)
+
+  const status = await readStatus(home, SKILL_A, nodeFileSystem(), store)
+  assert.equal(status.find((item) => item.target === 'claude')?.state, 'foreign')
+  const install = await installSkill(home, SKILL_A, nodeFileSystem(), store)
+  assert.equal(resultOf(install.results, 'claude').outcome, 'skipped-foreign')
+  assert.equal(await exists(dangling), false)
+  assert.ok((await lstat(file)).isSymbolicLink())
+  const uninstall = await uninstallSkill(home, nodeFileSystem(), store)
+  assert.equal(resultOf(uninstall.results, 'claude').outcome, 'kept-modified')
+  assert.ok((await lstat(file)).isSymbolicLink())
+  assert.equal((await store.load()).entries.length, 1)
+})
+
+test('M-3: a recorded SKILL.md replaced by a symlink to identical content is kept on uninstall', async () => {
+  const home = await makeHome('.claude')
+  const outside = await makeOutside()
+  const { store } = memoryStore()
+  await installSkill(home, SKILL_A, nodeFileSystem(), store)
+  const file = fileOf(home, 'claude')
+  const copy = join(outside, 'copy.md')
+  await rename(file, copy)
+  await symlink(copy, file)
+  const uninstall = await uninstallSkill(home, nodeFileSystem(), store)
+  assert.equal(resultOf(uninstall.results, 'claude').outcome, 'kept-modified')
+  assert.ok((await lstat(file)).isSymbolicLink())
+  assert.equal(await readFile(copy, 'utf8'), SKILL_A)
 })

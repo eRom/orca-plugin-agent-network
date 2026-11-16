@@ -14,6 +14,7 @@ declare module 'node:fs/promises' {
   export function rmdir(path: string): Promise<void>
   export function unlink(path: string): Promise<void>
   export function symlink(target: string, path: string): Promise<void>
+  export function rename(from: string, to: string): Promise<void>
 }
 
 declare module 'node:path' {
@@ -21,6 +22,7 @@ declare module 'node:path' {
   export function join(...parts: string[]): string
   export function dirname(path: string): string
   export function relative(from: string, to: string): string
+  export function resolve(...parts: string[]): string
 }
 
 declare module 'node:url' {

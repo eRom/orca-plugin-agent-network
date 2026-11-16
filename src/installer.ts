@@ -3,7 +3,7 @@
 // Le registre (ledger) garde, par fichier posé, son empreinte sha256 et les dossiers créés pour lui.
 import { createHash } from 'node:crypto'
 import { lstat, mkdir, readFile, rmdir, stat, unlink, writeFile } from 'node:fs/promises'
-import { dirname, sep } from 'node:path'
+import { dirname, resolve, sep } from 'node:path'
 import { skillFile, skillFolder, skillTargets, type SkillTarget, type TargetId } from './targets'
 
 /** Le disque, réduit à ce que l'installateur utilise : les tests y branchent de vrais dossiers temporaires. */
@@ -91,7 +91,8 @@ export function nodeFileSystem(): FileSystem {
         return true
       } catch (error) {
         const code = errorCode(error)
-        if (code === 'ENOTEMPTY' || code === 'EEXIST' || code === 'ENOENT') return false
+        // ENOTDIR : le chemin est devenu un lien symbolique ou un fichier, ce n'est plus un dossier à nous.
+        if (code === 'ENOTEMPTY' || code === 'EEXIST' || code === 'ENOENT' || code === 'ENOTDIR') return false
         throw error
       }
     }
@@ -104,12 +105,35 @@ async function isPresent(target: SkillTarget, fs: FileSystem): Promise<boolean> 
   return false
 }
 
-/** Étranger : le dossier de la skill est un lien symbolique, ou le fichier existe sans que le registre l'ait posé. */
-async function isForeign(target: SkillTarget, fs: FileSystem, entry: LedgerEntry | undefined): Promise<boolean> {
-  if (await fs.isSymlink(skillFolder(target))) return true
-  if (entry) return false
-  const file = skillFile(target)
-  return (await fs.exists(file)) || (await fs.isSymlink(file))
+/**
+ * Dossiers de l'entrée que l'installateur a le droit de toucher : après normalisation, strictement sous HOME
+ * et ancêtres du fichier de l'entrée. Tout le reste d'un registre trafiqué est ignoré, jamais supprimé.
+ */
+function trustedCreatedDirs(home: string, entry: LedgerEntry): string[] {
+  const root = resolve(home)
+  return entry.createdDirs.map((dir) => resolve(dir)).filter((dir) => dir.startsWith(root + sep) && entry.file.startsWith(dir + sep))
+}
+
+/** Chemins qui ne doivent jamais être des liens symboliques : écrire ou supprimer au travers sortirait de ce qu'on a posé. */
+const guardedPaths = (home: string, target: SkillTarget, entry: LedgerEntry | undefined): string[] => [
+  ...(entry ? trustedCreatedDirs(home, entry) : []),
+  target.skillsDir,
+  skillFolder(target),
+  skillFile(target)
+]
+
+async function hasSymlink(fs: FileSystem, paths: readonly string[]): Promise<boolean> {
+  for (const path of paths) if (await fs.isSymlink(path)) return true
+  return false
+}
+
+/**
+ * Étranger : un lien symbolique sur le dossier des skills, celui de la skill, le fichier lui-même ou un dossier que
+ * nous avions créé ; ou un fichier présent sans que le registre l'ait posé.
+ */
+async function isForeign(home: string, target: SkillTarget, fs: FileSystem, entry: LedgerEntry | undefined): Promise<boolean> {
+  if (await hasSymlink(fs, guardedPaths(home, target, entry))) return true
+  return entry ? false : fs.exists(skillFile(target))
 }
 
 export async function readStatus(home: string, skillText: string, fs: FileSystem, store: LedgerStore): Promise<TargetStatus[]> {
@@ -121,7 +145,7 @@ export async function readStatus(home: string, skillText: string, fs: FileSystem
     const entry = ledger.entries.find((candidate) => candidate.file === file)
     let state: TargetState
     if (!(await isPresent(target, fs))) state = 'absent-harness'
-    else if (await isForeign(target, fs, entry)) state = 'foreign'
+    else if (await isForeign(home, target, fs, entry)) state = 'foreign'
     else if (!entry) state = 'not-installed'
     else {
       const text = await fs.readText(file)
@@ -165,7 +189,25 @@ async function rollbackDirs(fs: FileSystem, created: readonly string[]): Promise
   }
 }
 
-export async function installSkill(home: string, skillText: string, fs: FileSystem, store: LedgerStore): Promise<InstallReport> {
+/** File d'attente unique : installation et désinstallation s'exécutent une par une, sinon chacune écraserait le registre de l'autre. */
+let queue: Promise<unknown> = Promise.resolve()
+
+/** Une erreur d'une opération ne casse pas la file : `queue` ne rejette jamais. */
+function serialized<T>(operation: () => Promise<T>): Promise<T> {
+  const run = queue.then(operation)
+  queue = run.catch(() => undefined)
+  return run
+}
+
+export function installSkill(home: string, skillText: string, fs: FileSystem, store: LedgerStore): Promise<InstallReport> {
+  return serialized(() => installNow(home, skillText, fs, store))
+}
+
+export function uninstallSkill(home: string, fs: FileSystem, store: LedgerStore): Promise<UninstallReport> {
+  return serialized(() => uninstallNow(home, fs, store))
+}
+
+async function installNow(home: string, skillText: string, fs: FileSystem, store: LedgerStore): Promise<InstallReport> {
   const ledger = await store.load()
   const wanted = sha256(skillText)
   const report: InstallReport = { results: [] }
@@ -181,15 +223,23 @@ export async function installSkill(home: string, skillText: string, fs: FileSyst
         continue
       }
       const entry = ledger.entries.find((candidate) => candidate.file === file)
-      if (await isForeign(target, fs, entry)) {
+      if (await isForeign(home, target, fs, entry)) {
         done('skipped-foreign')
         continue
       }
 
       if (!entry) {
         await writeSkill(fs, target, skillText, created)
-        ledger.entries.push({ target: target.id, file, sha256: wanted, createdDirs: created })
-        await store.save(ledger)
+        const fresh: LedgerEntry = { target: target.id, file, sha256: wanted, createdDirs: created }
+        ledger.entries.push(fresh)
+        try {
+          await store.save(ledger)
+        } catch (error) {
+          // Le registre n'a pas retenu le fichier : on le retire pour ne pas laisser un fichier à nous que personne ne reconnaît.
+          ledger.entries.pop()
+          await fs.removeFile(file)
+          throw error
+        }
         done('written')
         continue
       }
@@ -197,19 +247,34 @@ export async function installSkill(home: string, skillText: string, fs: FileSyst
       const text = await fs.readText(file)
       if (text === null) {
         // Fichier enregistré mais disparu : on le repose, en gardant la mémoire des dossiers déjà créés par nous.
+        const previous = { sha256: entry.sha256, createdDirs: entry.createdDirs }
         await writeSkill(fs, target, skillText, created)
         entry.sha256 = wanted
         entry.createdDirs = [...entry.createdDirs, ...created.filter((dir) => !entry.createdDirs.includes(dir))]
-        await store.save(ledger)
+        try {
+          await store.save(ledger)
+        } catch (error) {
+          Object.assign(entry, previous)
+          await fs.removeFile(file)
+          throw error
+        }
         done('written')
       } else if (sha256(text) !== entry.sha256) {
         done('skipped-modified')
       } else if (entry.sha256 === wanted) {
         done('unchanged')
       } else {
+        const previous = entry.sha256
         await fs.writeText(file, skillText)
         entry.sha256 = wanted
-        await store.save(ledger)
+        try {
+          await store.save(ledger)
+        } catch (error) {
+          // On remet l'ancien texte (dont on connaît l'empreinte) : disque et registre restent d'accord.
+          entry.sha256 = previous
+          await fs.writeText(file, text)
+          throw error
+        }
         done('updated')
       }
     } catch (error) {
@@ -220,17 +285,15 @@ export async function installSkill(home: string, skillText: string, fs: FileSyst
   return report
 }
 
-export async function uninstallSkill(home: string, fs: FileSystem, store: LedgerStore): Promise<UninstallReport> {
+async function uninstallNow(home: string, fs: FileSystem, store: LedgerStore): Promise<UninstallReport> {
   const ledger = await store.load()
   const entries = [...ledger.entries]
   const report: UninstallReport = { results: [] }
   const kept: LedgerEntry[] = []
 
-  /** Retire les dossiers créés par l'installateur, du plus profond au moins profond, seulement s'ils sont vides et sous HOME. */
+  /** Retire les dossiers créés par l'installateur, du plus profond au moins profond, seulement s'ils sont dignes de confiance et vides. */
   const removeCreatedDirs = async (entry: LedgerEntry): Promise<void> => {
-    for (const dir of [...entry.createdDirs].reverse()) {
-      if (dir.startsWith(home + sep)) await fs.removeEmptyDir(dir)
-    }
+    for (const dir of trustedCreatedDirs(home, entry).reverse()) await fs.removeEmptyDir(dir)
   }
 
   /** Traite une entrée et dit si elle reste au registre. */
@@ -240,7 +303,7 @@ export async function uninstallSkill(home: string, fs: FileSystem, store: Ledger
       return { outcome: 'failed', keep: true, error: 'ledger entry does not match its target in this home' }
     }
     try {
-      if (await fs.isSymlink(skillFolder(target))) return { outcome: 'kept-modified', keep: true }
+      if (await hasSymlink(fs, guardedPaths(home, target, entry))) return { outcome: 'kept-modified', keep: true }
       const text = await fs.readText(entry.file)
       if (text === null) {
         await removeCreatedDirs(entry)
