@@ -67,3 +67,14 @@ declare const process: { env: Record<string, string | undefined>; execPath: stri
 declare module 'node:fs' {
   export function existsSync(path: string): boolean
 }
+
+declare module 'node:test' {
+  /** Horloge simulée de node:test : seulement ce que les tests du panneau en utilisent. */
+  export const mock: {
+    timers: {
+      enable(options: { apis: readonly ('setInterval' | 'setTimeout' | 'setImmediate' | 'Date')[] }): void
+      tick(milliseconds: number): void
+      reset(): void
+    }
+  }
+}

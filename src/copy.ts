@@ -45,6 +45,8 @@ export type Messages = {
   // Libellés d'états.
   agentStates: Record<AgentState, string>
   targetStates: Record<TargetState, string>
+  /** Une phrase par état de cible, pour dire en clair ce que le plugin fera (ou ne fera pas) de ce dossier. */
+  targetStateHints: Record<TargetState, string>
   installOutcomes: Record<InstallOutcome, string>
   uninstallOutcomes: Record<UninstallOutcome, string>
 
@@ -67,6 +69,11 @@ export type Messages = {
   loading: string
   loadFailedTitle: string
   retry: string
+  refresh: string
+  /** Date du message illisible : le panneau n'invente pas d'heure. */
+  unknownTime: string
+  /** Le worker a répondu sans cible ni erreur : rien à installer ni à retirer. */
+  noTargets: string
 }
 
 const fr: Messages = {
@@ -105,6 +112,14 @@ const fr: Messages = {
     'absent-harness': 'Harnais absent',
     'not-installed': 'Non installé'
   },
+  targetStateHints: {
+    installed: 'À jour.',
+    outdated: 'Une version plus récente est disponible.',
+    modified: 'Tu as modifié ce fichier : il est laissé tel quel.',
+    foreign: "Un dossier agent-network qui n'a pas été écrit par ce plugin : il est laissé tel quel.",
+    'absent-harness': 'Harnais introuvable sur ce Mac.',
+    'not-installed': 'Pas encore installé.'
+  },
   installOutcomes: {
     written: 'Installé',
     updated: 'Mis à jour',
@@ -130,7 +145,7 @@ const fr: Messages = {
   noMessages: 'Aucun message pour le moment.',
   replyBadge: 'Réponse',
   unreadBadge: 'Non lu',
-  messageRoute: (from, to) => `${from} vers ${to}`,
+  messageRoute: (from, to) => `${from} → ${to}`,
   unknownSender: 'Expéditeur inconnu',
   instructionsHint: 'Installe les consignes qui apprennent à chaque harnais à écrire à ses voisins.',
   install: 'Installer',
@@ -138,7 +153,10 @@ const fr: Messages = {
   uninstall: 'Retirer',
   loading: 'Chargement',
   loadFailedTitle: 'Chargement impossible',
-  retry: 'Réessayer'
+  retry: 'Réessayer',
+  refresh: 'Actualiser',
+  unknownTime: 'heure inconnue',
+  noTargets: 'Aucun dossier de consignes à afficher.'
 }
 
 const en: Messages = {
@@ -177,6 +195,14 @@ const en: Messages = {
     'absent-harness': 'Harness not found',
     'not-installed': 'Not installed'
   },
+  targetStateHints: {
+    installed: 'Up to date.',
+    outdated: 'A newer version is available.',
+    modified: 'You edited this file: it is left untouched.',
+    foreign: 'An agent-network folder not written by this plugin: left untouched.',
+    'absent-harness': 'Harness not found on this Mac.',
+    'not-installed': 'Not installed yet.'
+  },
   installOutcomes: {
     written: 'Installed',
     updated: 'Updated',
@@ -202,7 +228,7 @@ const en: Messages = {
   noMessages: 'No messages yet.',
   replyBadge: 'Reply',
   unreadBadge: 'Unread',
-  messageRoute: (from, to) => `${from} to ${to}`,
+  messageRoute: (from, to) => `${from} → ${to}`,
   unknownSender: 'Unknown sender',
   instructionsHint: 'Install the instructions that teach each harness to message its neighbors.',
   install: 'Install',
@@ -210,7 +236,10 @@ const en: Messages = {
   uninstall: 'Remove',
   loading: 'Loading',
   loadFailedTitle: "Couldn't load",
-  retry: 'Retry'
+  retry: 'Retry',
+  refresh: 'Refresh',
+  unknownTime: 'unknown time',
+  noTargets: 'No instruction folder to show.'
 }
 
 export const MESSAGES: Record<Locale, Messages> = { en, fr }

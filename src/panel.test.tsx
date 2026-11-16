@@ -1,0 +1,440 @@
+// Le panneau Network tourne ici avec le vrai runtime d'Orca ; le worker est remplacé par des réponses simulées.
+import { mock } from 'node:test'
+import { assert, mockHost, mount, test } from 'orca/testing'
+import { MESSAGES } from './copy'
+import type { InstallReport, UninstallReport } from './installer'
+import * as panel from './panel'
+import type { AgentsView, FeedResult, StatusResult } from './protocol'
+import {
+  ALL_INSTALLED,
+  EMPTY_WORKSPACE_AGENTS,
+  FEED,
+  LIVE_AGENTS,
+  LONG_PREVIEW,
+  NONE_INSTALLED,
+  NO_WORKSPACE_AGENTS,
+  ONE_TARGET_OF_EACH_STATE,
+  OTHER_WORKSPACE_AGENTS,
+  UNDATED_MESSAGE,
+  UNREAD_MESSAGE
+} from './test-fixtures'
+
+const EN = MESSAGES.en
+const FR = MESSAGES.fr
+
+type Setup = {
+  agents?: () => AgentsView | Promise<AgentsView>
+  feed?: () => FeedResult | Promise<FeedResult>
+  status?: () => StatusResult
+  install?: () => InstallReport
+  uninstall?: () => UninstallReport
+  theme?: 'light' | 'dark'
+  locale?: string
+  visible?: boolean
+}
+
+/** Ce que le panneau a demandé au worker simulé, et ce que le worker simulé répond maintenant. */
+async function open(setup: Setup = {}) {
+  const state = {
+    agents: setup.agents ?? (() => LIVE_AGENTS),
+    feed: setup.feed ?? (() => ({ items: FEED })),
+    status: setup.status ?? (() => ({ targets: NONE_INSTALLED }))
+  }
+  const calls = { agents: 0, feed: 0, status: 0, install: 0, uninstall: 0 }
+  const requestOrder: string[] = []
+  const locales: string[] = []
+  const host = mockHost({
+    requests: {
+      'locale.set': (input: { locale: string }) => {
+        requestOrder.push('locale.set')
+        locales.push(input.locale)
+        return { ok: true as const }
+      },
+      'network.agents': () => {
+        requestOrder.push('network.agents')
+        calls.agents++
+        return state.agents()
+      },
+      'network.feed': () => {
+        requestOrder.push('network.feed')
+        calls.feed++
+        return state.feed()
+      },
+      'skill.status': () => {
+        requestOrder.push('skill.status')
+        calls.status++
+        return state.status()
+      },
+      'skill.install': () => {
+        calls.install++
+        return setup.install ? setup.install() : { results: [] }
+      },
+      'skill.uninstall': () => {
+        calls.uninstall++
+        return setup.uninstall ? setup.uninstall() : { results: [] }
+      }
+    }
+  })
+  const view = await mount(panel, { host, theme: setup.theme, locale: setup.locale ?? 'en-US', visible: setup.visible })
+  return { view, state, calls, requestOrder, locales }
+}
+
+type View = Awaited<ReturnType<typeof open>>['view']
+
+/** Un panneau propre : rien de jeté, aucun refus de l'hôte, aucun avertissement de rendu. */
+async function expectClean(view: View): Promise<void> {
+  assert.deepEqual(view.errors, [])
+  assert.deepEqual(view.refusals, [])
+  assert.deepEqual(view.warnings, [])
+  await view.unmount()
+}
+
+const STATUS_CHANGED = { workspaceId: null, paneKey: 'tab:pane', state: 'done' as const, receivedAt: 0 }
+
+const CONTEXT = (workspaceId: string, displayName: string) => ({ workspaceId, branch: 'main', displayName, terminals: [] })
+
+/** Remet l'horloge réelle même quand une assertion échoue au milieu d'un test à temps simulé. */
+async function withFakeTimers(body: () => Promise<void>): Promise<void> {
+  mock.timers.enable({ apis: ['setInterval', 'setTimeout'] })
+  try {
+    await body()
+  } finally {
+    mock.timers.reset()
+  }
+}
+
+// --- Agents -----------------------------------------------------------------------------------------------------
+
+test('shows a blocked agent distinctly', async () => {
+  const { view } = await open()
+  const tone = (label: string) => view.find({ type: 'Badge', text: label })?.props.tone
+  const tones = [tone(EN.agentStates.blocked), tone(EN.agentStates.working), tone(EN.agentStates.waiting), tone(EN.agentStates.done)]
+  assert.equal(tones[0], 'danger')
+  assert.equal(new Set(tones).size, 4, 'one distinct tone per state')
+  // La ligne bloquée est encadrée en danger : c'est ce qu'on voit avant même de lire le badge.
+  assert.equal(view.find({ testId: 'agent-term_claude' })?.props.border, 'danger')
+  assert.notEqual(view.find({ testId: 'agent-term_codex' })?.props.border, 'danger')
+  await expectClean(view)
+})
+
+test('lists an agent by title, then by harness name, with its icon and the time since its state began', async () => {
+  const { view } = await open()
+  assert.notEqual(view.find({ type: 'Text', text: 'Reviewer' }), null)
+  // Sans titre, la ligne porte le nom du harnais.
+  assert.notEqual(view.find({ testId: 'agent-term_grok' })?.text.match(/^Grok/), null)
+  const icons = view.findAll({ type: 'Image' }).map((image) => image.props.src)
+  for (const id of ['claude', 'codex', 'grok', 'antigravity']) assert.ok(icons.includes(`agent-icons/${id}.png`), id)
+  const times = view.findAll({ type: 'RelativeTime' }).map((time) => time.props.at)
+  assert.ok(times.includes(LIVE_AGENTS.agents[0]!.since), 'the blocked agent shows since when')
+  await expectClean(view)
+})
+
+test('draws a monogram chip for an agent without an icon', async () => {
+  const { view } = await open()
+  const row = view.find({ testId: 'agent-term_other' })
+  assert.ok(row)
+  assert.equal(view.findAll({ type: 'Image' }).filter((image) => String(image.props.src).includes('kimi')).length, 0)
+  // Le titre « Scratch » donne l'initiale « S » dans une pastille ronde.
+  assert.notEqual(view.find({ testId: 'monogram-term_other' }), null)
+  assert.equal(view.find({ testId: 'monogram-term_other' })?.text, 'S')
+  await expectClean(view)
+})
+
+test('picks the light-theme icon variant only where one is shipped', async () => {
+  const light = await open({ theme: 'light' })
+  const lightIcons = light.view.findAll({ type: 'Image' }).map((image) => String(image.props.src))
+  assert.ok(lightIcons.includes('agent-icons/on-light/codex.png'))
+  assert.ok(!lightIcons.includes('agent-icons/codex.png'))
+  assert.ok(lightIcons.includes('agent-icons/claude.png'))
+  await expectClean(light.view)
+
+  const dark = await open({ theme: 'dark' })
+  const darkIcons = dark.view.findAll({ type: 'Image' }).map((image) => String(image.props.src))
+  assert.ok(darkIcons.includes('agent-icons/codex.png'))
+  assert.ok(!darkIcons.some((src) => src.includes('on-light')))
+  await dark.view.emit('theme', { colorScheme: 'light' })
+  assert.ok(dark.view.findAll({ type: 'Image' }).some((image) => image.props.src === 'agent-icons/on-light/codex.png'))
+  await expectClean(dark.view)
+})
+
+// --- Rafraîchissement -------------------------------------------------------------------------------------------
+
+test('announces the locale first, then reads agents, feed and instructions state', async () => {
+  const { view, requestOrder, locales } = await open({ locale: 'fr-FR' })
+  assert.deepEqual(locales, ['fr-FR'])
+  assert.equal(requestOrder[0], 'locale.set')
+  assert.deepEqual([...requestOrder.slice(1)].sort(), ['network.agents', 'network.feed', 'skill.status'])
+  await expectClean(view)
+})
+
+test('reloads agents on agent.status.changed', async () => {
+  await withFakeTimers(async () => {
+    const { view, calls } = await open()
+    const before = { agents: calls.agents, feed: calls.feed }
+    await view.emit('agent.status.changed', STATUS_CHANGED)
+    await view.emit('agent.status.changed', STATUS_CHANGED)
+    mock.timers.tick(panel.AGENTS_DEBOUNCE_MS - 1)
+    await view.settled()
+    assert.equal(calls.agents, before.agents, 'not before the debounce delay')
+    mock.timers.tick(1)
+    await view.settled()
+    assert.equal(calls.agents, before.agents + 1, 'a burst of events asks once')
+    assert.equal(calls.feed, before.feed, 'the feed waits for its own, longer, delay')
+    mock.timers.tick(panel.FEED_DEBOUNCE_MS - panel.AGENTS_DEBOUNCE_MS)
+    await view.settled()
+    assert.equal(calls.feed, before.feed + 1)
+    await expectClean(view)
+  })
+})
+
+test('switches workspace on workspace.changed', async () => {
+  const { view, state, calls } = await open()
+  assert.notEqual(view.find({ type: 'Text', text: 'Reviewer' }), null)
+  const before = { ...calls }
+  state.agents = () => OTHER_WORKSPACE_AGENTS
+  state.feed = () => ({ items: [] })
+  await view.emit('workspace.changed', { context: CONTEXT('w2', 'Other workspace') })
+  assert.equal(view.find({ type: 'Text', text: 'Reviewer' }), null)
+  assert.notEqual(view.find({ type: 'Text', text: 'Lone harness' }), null)
+  assert.equal(view.find({ text: UNREAD_MESSAGE.subject }), null, 'the old feed is gone too')
+  assert.equal(calls.agents, before.agents + 1)
+  assert.equal(calls.feed, before.feed + 1)
+  assert.equal(calls.status, before.status + 1)
+  await expectClean(view)
+})
+
+test('drops the answer of a read that a newer one has outrun', async () => {
+  const { view, state } = await open()
+  let release: (view: AgentsView) => void = () => undefined
+  const slow = new Promise<AgentsView>((resolve) => {
+    release = resolve
+  })
+  // La première relecture reste en vol ; la seconde, lancée après, répond tout de suite.
+  let asked = 0
+  state.agents = () => (++asked === 1 ? slow : OTHER_WORKSPACE_AGENTS)
+  const first = view.emit('workspace.changed', { context: CONTEXT('w2', 'Other workspace') })
+  await new Promise<void>((resolve) => setTimeout(resolve, 20))
+  const second = view.emit('workspace.changed', { context: CONTEXT('w3', 'Third workspace') })
+  // Un `emit` attend toutes les requêtes en vol : la lente doit être libérée avant d'attendre quoi que ce soit.
+  await new Promise<void>((resolve) => setTimeout(resolve, 20))
+  release(LIVE_AGENTS)
+  await Promise.all([first, second])
+  assert.notEqual(view.find({ type: 'Text', text: 'Lone harness' }), null, 'the older answer does not come back')
+  assert.equal(view.find({ type: 'Text', text: 'Reviewer' }), null)
+  await expectClean(view)
+})
+
+test('polls the feed only while visible', async () => {
+  await withFakeTimers(async () => {
+    const { view, calls } = await open()
+    const start = calls.feed
+    for (let tick = 0; tick < 2; tick++) {
+      mock.timers.tick(panel.FEED_POLL_MS)
+      await view.settled()
+    }
+    assert.equal(calls.feed, start + 2, 'two polls in 10 seconds while visible')
+
+    await view.setVisible(false)
+    for (let tick = 0; tick < 2; tick++) {
+      mock.timers.tick(panel.FEED_POLL_MS)
+      await view.settled()
+    }
+    assert.equal(calls.feed, start + 2, 'no poll while hidden')
+
+    await view.setVisible(true)
+    mock.timers.tick(panel.FEED_POLL_MS)
+    await view.settled()
+    assert.equal(calls.feed, start + 3, 'polling resumes once visible again')
+
+    await view.unmount()
+    mock.timers.tick(panel.FEED_POLL_MS * 3)
+    await new Promise<void>((resolve) => resolve())
+    assert.equal(calls.feed, start + 3, 'no poll after the panel is closed')
+  })
+})
+
+test('reloads only the instructions section on skill.changed', async () => {
+  const { view, calls } = await open()
+  const before = { ...calls }
+  assert.notEqual(view.find({ text: EN.install }), null)
+  await view.post('skill.changed', { targets: ALL_INSTALLED })
+  assert.equal(view.find({ text: EN.install }), null, 'nothing left to install')
+  assert.equal(calls.agents, before.agents)
+  assert.equal(calls.feed, before.feed)
+  assert.equal(calls.status, before.status)
+  await expectClean(view)
+})
+
+// --- Messages ---------------------------------------------------------------------------------------------------
+
+test('shows each message with its route, subject, preview and time', async () => {
+  const { view } = await open()
+  assert.notEqual(view.find({ text: 'codex · Builder → claude · Reviewer' }), null)
+  assert.notEqual(view.find({ text: UNREAD_MESSAGE.subject }), null)
+  const preview = view.find({ type: 'Text', text: LONG_PREVIEW })
+  assert.ok(preview, 'the 141-character preview is drawn whole')
+  assert.equal(preview.props.truncate, true, 'and cut cleanly at the sidebar width')
+  assert.equal(LONG_PREVIEW.length, 141)
+  assert.notEqual(view.find({ text: EN.messageRoute(EN.unknownSender, 'grok') }), null)
+  assert.notEqual(view.find({ text: EN.messageRoute('closed terminal', 'antigravity · Docs') }), null)
+  await expectClean(view)
+})
+
+test('marks unread messages and, discreetly, replies', async () => {
+  const { view } = await open()
+  assert.equal(view.findAll({ type: 'Badge', text: EN.unreadBadge }).length, 1)
+  assert.equal(view.find({ testId: 'message-m1' })?.text.includes(EN.unreadBadge), true)
+  assert.equal(view.find({ testId: 'message-m2' })?.text.includes(EN.unreadBadge), false)
+  assert.equal(view.find({ testId: 'message-m2' })?.text.includes(EN.replyBadge), true)
+  assert.equal(view.find({ testId: 'message-m1' })?.text.includes(EN.replyBadge), false)
+  assert.equal(view.findAll({ type: 'Badge', text: EN.replyBadge }).length, 0, 'a reply is a muted word, not a badge')
+  await expectClean(view)
+})
+
+test('shows no relative time, only a muted unknown time, for an undated message', async () => {
+  const { view } = await open()
+  const undated = view.find({ testId: `message-${UNDATED_MESSAGE.id}` })
+  assert.ok(undated)
+  assert.equal(undated.text.includes(EN.unknownTime), true)
+  assert.equal(view.findAll({ type: 'RelativeTime', testId: undefined }).some((time) => time.props.at === 0), false)
+  // Les trois autres messages gardent leur heure relative.
+  const messageTimes = view.findAll({ type: 'RelativeTime' }).filter((time) => FEED.some((item) => item.at === time.props.at && item.at !== 0))
+  assert.equal(messageTimes.length, 3)
+  await expectClean(view)
+})
+
+test('keeps agents when the feed fails, and says why', async () => {
+  const { view, state, calls } = await open({ feed: () => ({ error: EN.feedTimeout }) })
+  // Les agents restent affichés ...
+  assert.notEqual(view.find({ type: 'Text', text: 'Reviewer' }), null)
+  assert.notEqual(view.find({ type: 'Badge', text: EN.agentStates.blocked }), null)
+  // ... et l'erreur du fil est visible, sans passer pour un fil vide.
+  assert.notEqual(view.find({ text: EN.feedTimeout }), null)
+  assert.equal(view.find({ text: EN.noMessages }), null)
+  // Réessayer relit le fil.
+  state.feed = () => ({ items: FEED })
+  const before = calls.feed
+  await view.press({ text: EN.retry })
+  assert.equal(calls.feed, before + 1)
+  assert.equal(view.find({ text: EN.feedTimeout }), null)
+  assert.notEqual(view.find({ text: UNREAD_MESSAGE.subject }), null)
+  await expectClean(view)
+})
+
+test('tells apart no workspace, no agent and no message', async () => {
+  const noWorkspace = await open({ agents: () => NO_WORKSPACE_AGENTS, feed: () => ({ items: [] }) })
+  assert.notEqual(noWorkspace.view.find({ label: EN.noWorkspace }), null)
+  assert.equal(noWorkspace.view.find({ text: EN.noAgents }), null)
+  assert.equal(noWorkspace.view.find({ text: EN.noMessages }), null)
+  // Les consignes ne dépendent pas du workspace.
+  assert.notEqual(noWorkspace.view.find({ text: EN.install }), null)
+  await expectClean(noWorkspace.view)
+
+  const empty = await open({ agents: () => EMPTY_WORKSPACE_AGENTS, feed: () => ({ items: [] }) })
+  assert.equal(empty.view.find({ label: EN.noWorkspace }), null)
+  assert.notEqual(empty.view.find({ text: EN.noAgents }), null)
+  assert.notEqual(empty.view.find({ text: EN.noMessages }), null)
+  await expectClean(empty.view)
+})
+
+// --- Consignes --------------------------------------------------------------------------------------------------
+
+test('explains every target state in plain words', async () => {
+  const { view } = await open({ status: () => ({ targets: ONE_TARGET_OF_EACH_STATE }) })
+  for (const state of ['installed', 'outdated', 'modified', 'foreign', 'absent-harness', 'not-installed'] as const) {
+    assert.ok(view.find({ text: EN.targetStates[state] }), `label of ${state}`)
+    assert.ok(view.find({ text: EN.targetStateHints[state] }), `hint of ${state}`)
+  }
+  assert.match(EN.targetStateHints.foreign, /not written by this plugin: left untouched/)
+  assert.match(EN.targetStateHints.modified, /You edited it|You edited this file/)
+  assert.match(EN.targetStateHints['absent-harness'], /not found/)
+  // Les harnais d'une cible partagée sont nommés.
+  assert.notEqual(view.find({ text: 'Codex, DeepSeek Harness' }), null)
+  await expectClean(view)
+})
+
+test('offers Update instead of Install when a target is outdated', async () => {
+  const { view } = await open({ status: () => ({ targets: ONE_TARGET_OF_EACH_STATE }) })
+  assert.notEqual(view.find({ type: 'Button', text: EN.update }), null)
+  assert.equal(view.find({ type: 'Button', text: EN.install }), null)
+  await expectClean(view)
+})
+
+test('install button calls skill.install and shows the result', async () => {
+  const report: InstallReport = {
+    results: [
+      { target: 'claude', file: '/h/.claude/skills/agent-network/SKILL.md', outcome: 'written' },
+      { target: 'shared', file: '/h/.agents/skills/agent-network/SKILL.md', outcome: 'skipped-foreign' },
+      { target: 'grok', file: '/h/.grok/skills/agent-network/SKILL.md', outcome: 'absent-harness' }
+    ]
+  }
+  const { view, calls } = await open({ install: () => report })
+  await view.press({ type: 'Button', text: EN.install })
+  assert.equal(calls.install, 1)
+  const feedback = view.find({ testId: 'action-feedback' })
+  assert.ok(feedback)
+  assert.match(feedback.text, /Claude Code: Installed/)
+  assert.match(feedback.text, /Codex, DeepSeek Harness: Skipped: third-party folder/)
+  assert.match(feedback.text, /Grok: Harness not found/)
+  await expectClean(view)
+})
+
+test('remove button calls skill.uninstall and shows the result, and is disabled when nothing is installed', async () => {
+  const none = await open()
+  assert.equal(none.view.find({ type: 'Button', text: EN.uninstall })?.disabled, true)
+  await expectClean(none.view)
+
+  const report: UninstallReport = { results: [{ target: 'claude', file: '/h/.claude/skills/agent-network/SKILL.md', outcome: 'removed' }] }
+  const { view, calls } = await open({ status: () => ({ targets: ALL_INSTALLED }), uninstall: () => report })
+  await view.press({ type: 'Button', text: EN.uninstall })
+  assert.equal(calls.uninstall, 1)
+  assert.match(view.find({ testId: 'action-feedback' })?.text ?? '', /Claude Code: Removed/)
+  await expectClean(view)
+})
+
+test('shows the localized message of a rejected install, never an unhandled rejection', async () => {
+  const { view } = await open({
+    install: () => {
+      throw new Error("Couldn't install: disk is read-only")
+    }
+  })
+  await view.press({ type: 'Button', text: EN.install })
+  const feedback = view.find({ testId: 'action-feedback' })
+  assert.ok(feedback)
+  assert.match(feedback.text, /Couldn't install: disk is read-only/)
+  assert.equal(feedback.props.tone, 'danger')
+  // Le bouton est de nouveau disponible.
+  assert.equal(view.find({ type: 'Button', text: EN.install })?.disabled, false)
+  await expectClean(view)
+})
+
+test('shows why the instructions state could not be read', async () => {
+  const { view } = await open({ status: () => ({ targets: [], error: "Couldn't read the install status: EACCES" }) })
+  assert.notEqual(view.find({ text: /EACCES/ }), null)
+  await expectClean(view)
+})
+
+// --- Langue -----------------------------------------------------------------------------------------------------
+
+test('renders in French when locale is fr', async () => {
+  const { view } = await open({ locale: 'fr-FR', status: () => ({ targets: ONE_TARGET_OF_EACH_STATE }) })
+  assert.notEqual(view.find({ text: FR.agentStates.blocked }), null)
+  assert.notEqual(view.find({ text: FR.sectionAgents }), null)
+  assert.notEqual(view.find({ text: FR.sectionMessages }), null)
+  assert.notEqual(view.find({ text: FR.sectionInstructions }), null)
+  assert.notEqual(view.find({ text: FR.update }), null)
+  assert.notEqual(view.find({ text: FR.targetStateHints.foreign }), null)
+  assert.notEqual(view.find({ text: FR.unreadBadge }), null)
+  assert.notEqual(view.find({ text: 'codex · Builder → claude · Reviewer' }), null)
+  assert.notEqual(view.find({ text: FR.unknownTime }), null)
+  assert.equal(view.find({ text: EN.update }), null)
+  await expectClean(view)
+})
+
+test('draws no em dash in either language', async () => {
+  for (const locale of ['en-US', 'fr-FR']) {
+    const { view } = await open({ locale, status: () => ({ targets: ONE_TARGET_OF_EACH_STATE }) })
+    assert.equal(JSON.stringify(view.tree()).includes(String.fromCharCode(0x2014)), false, locale)
+    await expectClean(view)
+  }
+})
