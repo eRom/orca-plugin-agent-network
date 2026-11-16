@@ -112,14 +112,17 @@ export function setup(ctx: PanelContext): void {
   // Un nouveau panneau repart sans workspace connu : la première notification n'est pas un changement.
   lastWorkspaceId = undefined
   const timers = new Set<ReturnType<typeof setTimeout>>()
-  /** Relance `load` dans `delay` ms ; une rafale d'appels ne fait qu'une lecture, à la fin. */
+  /** Relance `load` dans `delay` ms ; une rafale d'appels ne fait qu'une lecture, à la fin. `cancel` annule l'attente. */
   const debounced = (load: () => Promise<unknown>, delay: number) => {
     let pending: ReturnType<typeof setTimeout> | undefined
-    return () => {
-      if (pending !== undefined) {
-        clearTimeout(pending)
-        timers.delete(pending)
-      }
+    const cancel = () => {
+      if (pending === undefined) return
+      clearTimeout(pending)
+      timers.delete(pending)
+      pending = undefined
+    }
+    const schedule = () => {
+      cancel()
       const handle = setTimeout(() => {
         timers.delete(handle)
         pending = undefined
@@ -128,15 +131,16 @@ export function setup(ctx: PanelContext): void {
       pending = handle
       timers.add(handle)
     }
+    return { schedule, cancel }
   }
-  const scheduleAgents = debounced(loadAgents, AGENTS_DEBOUNCE_MS)
-  const scheduleFeed = debounced(loadFeed, FEED_DEBOUNCE_MS)
-  const scheduleAll = debounced(loadAll, AGENTS_DEBOUNCE_MS)
+  const agentsReload = debounced(loadAgents, AGENTS_DEBOUNCE_MS)
+  const feedReload = debounced(loadFeed, FEED_DEBOUNCE_MS)
+  const allReload = debounced(loadAll, AGENTS_DEBOUNCE_MS)
 
   ctx.subscriptions.push(
     on('agent.status.changed', () => {
-      scheduleAgents()
-      scheduleFeed()
+      agentsReload.schedule()
+      feedReload.schedule()
     })
   )
   ctx.subscriptions.push(
@@ -149,13 +153,18 @@ export function setup(ctx: PanelContext): void {
       }
       if (workspaceId === lastWorkspaceId) {
         // Même workspace (terminal ouvert, fermé ou renommé) : on garde l'affichage et on relit après la rafale.
-        scheduleAll()
+        allReload.schedule()
         return
       }
       // Un autre workspace : on ne montre pas, même un instant, les agents et le fil du précédent.
       lastWorkspaceId = workspaceId
+      // La relecture groupée du workspace précédent n'a plus lieu d'être : `loadAll` va la remplacer.
+      allReload.cancel()
+      agentsReload.cancel()
+      feedReload.cancel()
       set(agentsView, null)
       set(feedResult, null)
+      set(agentsFailure, null)
       void loadAll()
     })
   )
@@ -302,6 +311,20 @@ function renderAgentRow(m: Messages, agent: AgentsView['agents'][number]) {
   )
 }
 
+/** Avis discret quand la relecture des agents échoue alors que la liste (même vide) reste affichée. */
+function renderAgentsStale(m: Messages) {
+  return (
+    <Row key="agents-stale" align="center" gap="sm">
+      <Text muted size="xs">
+        {m.agentsStale}
+      </Text>
+      <Button variant="ghost" size="sm" onPress={loadAgents}>
+        {m.retry}
+      </Button>
+    </Row>
+  )
+}
+
 function renderAgentsSection(m: Messages) {
   const view = read(agentsView)
   const failure = read(agentsFailure)
@@ -323,24 +346,18 @@ function renderAgentsSection(m: Messages) {
       )
   } else if (view.agents.length === 0) {
     body = (
-      <Text muted size="xs">
-        {m.noAgents}
-      </Text>
+      <Stack gap="xs">
+        <Text muted size="xs">
+          {m.noAgents}
+        </Text>
+        {failure === null ? null : renderAgentsStale(m)}
+      </Stack>
     )
   } else {
     body = (
       <Stack gap="xs">
         {renderRuled(view.agents.map((agent) => ({ key: agent.handle, node: renderAgentRow(m, agent) })))}
-        {failure === null ? null : (
-          <Row key="agents-stale" align="center" gap="sm">
-            <Text muted size="xs">
-              {m.agentsStale}
-            </Text>
-            <Button variant="ghost" size="sm" onPress={loadAgents}>
-              {m.retry}
-            </Button>
-          </Row>
-        )}
+        {failure === null ? null : renderAgentsStale(m)}
       </Stack>
     )
   }
@@ -434,13 +451,18 @@ function renderMessagesSection(m: Messages) {
 /** « Claude Code », « Codex · DSH » : assez court pour tenir sur une ligne à 360 px. */
 const targetLabel = (harnesses: readonly string[]): string => harnesses.map(harnessShortName).join(' · ')
 
+/** Place de deux icônes sur toutes les lignes de cibles : les libellés restent alignés, que la cible serve un ou deux harnais. */
+const TARGET_ICON_SLOT_WIDTH = 2 * LEAD_SLOT_WIDTH + 8
+
 /** Une ligne par cible, sur une seule ligne : harnais servis, libellé d'état à droite. L'explication se lit sous la liste. */
 function renderTarget(m: Messages, target: StatusResult['targets'][number], index: number) {
   const key = `target-${index}-${target.target}`
   const tone = TARGET_STATE_TONE[target.state]
   return (
     <Box key={key} direction="row" align="center" gap="sm" paddingY="sm">
-      {target.harnesses.map((harness) => renderLead(`${key}-${harness}`, harnessName(harness), harness))}
+      <Box key={`icons-${key}`} width={TARGET_ICON_SLOT_WIDTH} shrink={false} direction="row" align="center" gap="xs">
+        {target.harnesses.map((harness) => renderLead(`${key}-${harness}`, harnessName(harness), harness))}
+      </Box>
       <Box key={`names-${key}`} grow minWidth={0}>
         <Text weight="medium" truncate>
           {targetLabel(target.harnesses)}

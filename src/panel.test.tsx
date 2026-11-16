@@ -594,3 +594,61 @@ test('French feedback lines put a space before the colon, English ones do not', 
   assert.match(en.view.find({ testId: 'action-feedback' })?.text ?? '', /Claude Code: Installed/)
   await expectClean(en.view)
 })
+
+test('a workspace switch drops the previous workspace failure, showing the skeleton instead of its danger callout', async () => {
+  const { view, state } = await open({
+    agents: () => {
+      throw new Error('first workspace unreachable')
+    }
+  })
+  assert.notEqual(view.find({ type: 'Callout', text: /first workspace unreachable/ }), null)
+  await view.emit('workspace.changed', { context: CONTEXT('w1', 'My workspace') })
+  let release: (view: AgentsView) => void = () => undefined
+  state.agents = () => new Promise<AgentsView>((resolve) => (release = resolve))
+  const switching = view.emit('workspace.changed', { context: CONTEXT('w2', 'Other workspace') })
+  await new Promise<void>((resolve) => setTimeout(resolve, 20))
+  assert.equal(view.find({ type: 'Callout', text: /first workspace unreachable/ }), null)
+  assert.notEqual(view.find({ type: 'Skeleton' }), null)
+  release(OTHER_WORKSPACE_AGENTS)
+  await switching
+  assert.notEqual(view.find({ type: 'Text', text: 'Lone harness' }), null)
+  await expectClean(view)
+})
+
+test('a pending same-workspace reload does not fire after a switch to another workspace', async () => {
+  await withFakeTimers(async () => {
+    const { view, calls } = await open()
+    await view.emit('workspace.changed', { context: CONTEXT('w1', 'My workspace') })
+    await view.emit('workspace.changed', { context: CONTEXT('w1', 'My workspace') })
+    await view.emit('workspace.changed', { context: CONTEXT('w2', 'Other workspace') })
+    const afterSwitch = { ...calls }
+    mock.timers.tick(panel.FEED_DEBOUNCE_MS * 2)
+    await view.settled()
+    assert.deepEqual(calls, afterSwitch, 'the old timer was cancelled')
+    await expectClean(view)
+  })
+})
+
+test('a failed reload with an empty agent list says so, with Retry, instead of staying silent', async () => {
+  const { view, state } = await open({ agents: () => EMPTY_WORKSPACE_AGENTS })
+  state.agents = () => {
+    throw new Error('worker unreachable')
+  }
+  await view.press({ label: EN.refresh })
+  assert.notEqual(view.find({ type: 'Text', text: EN.noAgents }), null)
+  assert.notEqual(view.find({ type: 'Text', text: EN.agentsStale }), null)
+  state.agents = () => EMPTY_WORKSPACE_AGENTS
+  await view.press({ type: 'Button', text: EN.retry })
+  assert.equal(view.find({ type: 'Text', text: EN.agentsStale }), null)
+  await expectClean(view)
+})
+
+test('every target row reserves the same icon slot, so labels align whether a target has one or two icons', async () => {
+  const { view } = await open({ status: () => ({ targets: ONE_TARGET_OF_EACH_STATE }) })
+  // `findAll` ne rend que les éléments les plus internes : on retrouve chaque emplacement par sa clé.
+  const slots = ONE_TARGET_OF_EACH_STATE.map((entry, index) => view.find({ testId: `icons-target-${index}-${entry.target}` }))
+  assert.equal(slots.filter((slot) => slot !== null).length, ONE_TARGET_OF_EACH_STATE.length)
+  assert.equal(new Set(slots.map((slot) => slot?.props.width)).size, 1)
+  assert.equal(slots.every((slot) => typeof slot?.props.width === 'number' && slot.props.width >= 2 * 20), true)
+  await expectClean(view)
+})

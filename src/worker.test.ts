@@ -286,8 +286,10 @@ test('the last announced language wins, and any French variant is French', async
 })
 
 test('logs the resolved orca binary once at activation', async () => {
-  const worker = await mount(hostWith(), await makeDeps({ orcaBinary: '/Applications/Orca.app/Contents/Resources/bin/orca' }))
-  assert.deepEqual(worker.logs.filter((line) => line.startsWith('orca binary')), ['orca binary: /Applications/Orca.app/Contents/Resources/bin/orca'])
+  const worker = await mount(hostWith(), await makeDeps({ orcaBinary: '/Applications/Orca.app/Contents/Resources/bin/orca', execPath: '/Applications/Orca.app/Contents/Frameworks/Orca Helper.app/Contents/MacOS/Orca Helper' }))
+  assert.deepEqual(worker.logs.filter((line) => line.startsWith('orca binary')), [
+    'orca binary: /Applications/Orca.app/Contents/Resources/bin/orca (execPath /Applications/Orca.app/Contents/Frameworks/Orca Helper.app/Contents/MacOS/Orca Helper)'
+  ])
   await worker.deactivate()
 })
 

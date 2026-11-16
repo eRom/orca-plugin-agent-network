@@ -168,6 +168,33 @@ test('resolveOrcaBinary prefers the app bundle', () => {
   assert.equal(resolveOrcaBinary(execPath, () => false), 'orca')
 })
 
+test('resolveOrcaBinary finds the bundle from an Electron helper process inside Frameworks', () => {
+  const helper = '/Applications/Orca.app/Contents/Frameworks/Orca Helper.app/Contents/MacOS/Orca Helper'
+  const wanted = '/Applications/Orca.app/Contents/Resources/bin/orca'
+  assert.equal(resolveOrcaBinary(helper, (path) => path === wanted), wanted)
+})
+
+test('resolveOrcaBinary picks the outermost .app of a nested chain, never an inner one', () => {
+  const nested = '/Users/me/Apps/Orca.app/Contents/Frameworks/Orca Helper (Renderer).app/Contents/Frameworks/Deeper.app/Contents/MacOS/x'
+  const outer = '/Users/me/Apps/Orca.app/Contents/Resources/bin/orca'
+  const inner = '/Users/me/Apps/Orca.app/Contents/Frameworks/Orca Helper (Renderer).app/Contents/Resources/bin/orca'
+  const asked: string[] = []
+  assert.equal(
+    resolveOrcaBinary(nested, (path) => {
+      asked.push(path)
+      return path === outer || path === inner
+    }),
+    outer
+  )
+  assert.deepEqual(asked, [outer], 'only the outermost bundle is looked at')
+})
+
+test('resolveOrcaBinary falls back to orca on the PATH without an .app ancestor, or when the bundle has no CLI', () => {
+  assert.equal(resolveOrcaBinary('/usr/local/bin/node', () => true), 'orca')
+  assert.equal(resolveOrcaBinary('/opt/electron/electron', () => true), 'orca')
+  assert.equal(resolveOrcaBinary('/Applications/Orca.app/Contents/Frameworks/Orca Helper.app/Contents/MacOS/Orca Helper', () => false), 'orca')
+})
+
 /** Dossiers temporaires des faux binaires, supprimés après chaque test. */
 const roots: string[] = []
 

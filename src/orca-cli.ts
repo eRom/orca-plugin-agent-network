@@ -1,6 +1,6 @@
 // Appelle le CLI `orca` depuis le worker : un processus par appel, sans shell, avec délai et taille de sortie bornés.
 import { execFile } from 'node:child_process'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 
 /** Rend le champ `result` du JSON du CLI, ou lève `OrcaCliError`. */
 export type OrcaRunner = (args: readonly string[]) => Promise<unknown>
@@ -18,9 +18,16 @@ export class OrcaCliError extends Error {
 
 const MAX_BUFFER_BYTES = 4 * 1024 * 1024
 
-/** Le binaire embarqué dans l'application si on le trouve, sinon `orca` du PATH. */
+/**
+ * Le binaire embarqué dans l'application si on le trouve, sinon `orca` du PATH.
+ * Dans un worker de plugin, `execPath` est souvent un processus auxiliaire d'Electron, rangé dans un `.app` imbriqué
+ * (`Orca.app/Contents/Frameworks/Orca Helper.app/Contents/MacOS/Orca Helper`) : on prend le `.app` le plus extérieur.
+ */
 export function resolveOrcaBinary(execPath: string, exists: (path: string) => boolean): string {
-  const bundled = join(dirname(execPath), '..', 'Resources', 'bin', 'orca')
+  const parts = execPath.split('/')
+  const outermost = parts.findIndex((part) => part.endsWith('.app'))
+  if (outermost === -1) return 'orca'
+  const bundled = join(parts.slice(0, outermost + 1).join('/'), 'Contents', 'Resources', 'bin', 'orca')
   return exists(bundled) ? bundled : 'orca'
 }
 

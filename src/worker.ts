@@ -37,6 +37,8 @@ export type WorkerDeps = {
   runOrca: OrcaRunner
   /** Binaire `orca` résolu, journalisé une fois à l'activation (contrôle en direct). */
   orcaBinary?: string
+  /** Chemin de l'exécutable du worker, journalisé avec le binaire pour comprendre une résolution en repli. */
+  execPath?: string
 }
 
 export function defaultDeps(): WorkerDeps {
@@ -47,7 +49,8 @@ export function defaultDeps(): WorkerDeps {
     readSkill: () => readFile(skillPath, 'utf8'),
     fs: nodeFileSystem(),
     runOrca: createOrcaRunner(orcaBinary),
-    orcaBinary
+    orcaBinary,
+    execPath: process.execPath
   }
 }
 
@@ -113,7 +116,7 @@ export async function activateWith(orca: OrcaWorkerApi, deps: WorkerDeps): Promi
   let corruptLedgerHandled = false
   const m = (): Messages => MESSAGES[locale]
 
-  if (deps.orcaBinary) orca.log(`orca binary: ${deps.orcaBinary}`)
+  if (deps.orcaBinary) orca.log(`orca binary: ${deps.orcaBinary} (execPath ${deps.execPath ?? 'unknown'})`)
 
   /** Langue relue au démarrage ; best effort, une lecture refusée laisse l'anglais. */
   async function loadLocale(): Promise<void> {
