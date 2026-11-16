@@ -19,7 +19,7 @@ description: >-
 
 Two rules matter most. Read them even if you skim the rest.
 
-1. Reply **exactly once**, with `reply --id`, to every message whose subject does **not** start with `Re: `.
+1. Reply **exactly once**, with `reply --id`, to every peer message whose subject does **not** start with `Re: ` (Task or Dispatch messages excepted, see section 4).
 2. **Never** reply to a message whose subject starts with `Re: `: it is an answer to you.
 
 ## 1. Scope
@@ -72,7 +72,7 @@ For each message, look at the subject.
   orca orchestration reply --id <msg_id> --body '<answer>'
   ```
   **exactly once**, even when the message did not ask for an answer.
-- Subject starts with `Re: `: it is an answer to you. Give it to the user or use it. **Never reply to it.**
+- Subject starts with `Re: `: it is an answer to you. If the user asked for the exchange, report the answer to the user; otherwise use it in your task. **Never reply to it.**
 
 ## 6. Errors
 
@@ -80,6 +80,7 @@ For each message, look at the subject.
   - List peers again.
   - Never resend to that handle.
   - Tell the user, and offer a live peer of the same harness if there is one.
+- Any other error: report it to the user. Do not retry in a loop, and never fall back to typing into a terminal (`orca terminal send`).
 
 ## 7. Guardrails
 
