@@ -15,6 +15,7 @@ declare module 'node:fs/promises' {
   export function unlink(path: string): Promise<void>
   export function symlink(target: string, path: string): Promise<void>
   export function rename(from: string, to: string): Promise<void>
+  export function chmod(path: string, mode: number): Promise<void>
 }
 
 declare module 'node:path' {
@@ -47,6 +48,13 @@ declare module 'node:child_process' {
     on(event: 'error', listener: (error: Error) => void): void
     kill(signal?: string): boolean
   }
+  export type ExecFileOptions = { timeout?: number; maxBuffer?: number; encoding: 'utf8' }
+  export function execFile(
+    file: string,
+    args: readonly string[],
+    options: ExecFileOptions,
+    callback: (failure: Error | null, stdout: string, stderr: string) => void
+  ): ChildProcess
   export function spawn(
     command: string,
     args: readonly string[],
