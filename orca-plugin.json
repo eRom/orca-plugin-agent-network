@@ -1,0 +1,31 @@
+{
+  "manifestVersion": 2,
+  "id": "agent-network",
+  "name": "Agent Network",
+  "version": "0.1.0",
+  "description": "Let coding agents in an Orca workspace message each other: installs the teammate instructions for each harness and shows the workspace's agents and their latest messages.",
+  "author": { "name": "Romain Ecarnot", "url": "https://github.com/eRom" },
+  "repository": "https://github.com/eRom/orca-plugin-agent-network",
+  "license": "MIT",
+  "engines": {
+    "orca": ">=1.4.248"
+  },
+  "execution": "trusted-worker",
+  "pluginApi": 1,
+  "main": "src/worker.ts",
+  "capabilities": [
+    { "kind": "workspace:read" },
+    { "kind": "agent:read" },
+    { "kind": "storage:own" }
+  ],
+  "contributes": {
+    "panels": [
+      { "id": "network", "title": "Network", "icon": "link", "entry": "src/panel.tsx", "ui": "components" }
+    ],
+    "commands": [
+      { "id": "agentNetwork.installSkill", "title": "Agent network: install teammate instructions", "when": "global" },
+      { "id": "agentNetwork.uninstallSkill", "title": "Agent network: remove teammate instructions", "when": "global" }
+    ],
+    "events": [{ "on": "agent.status.changed" }, { "on": "workspace.changed" }]
+  }
+}

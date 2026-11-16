@@ -1,0 +1,55 @@
+// Les typings d'Orca n'embarquent pas les types Node : on ne déclare que les membres réellement utilisés.
+declare module 'node:fs/promises' {
+  export type Stats = { isSymbolicLink(): boolean; isDirectory(): boolean; isFile(): boolean; mtimeMs: number }
+  export type DirEntry = { name: string; isDirectory(): boolean; isSymbolicLink(): boolean }
+  export function stat(path: string): Promise<Stats>
+  export function lstat(path: string): Promise<Stats>
+  export function readFile(path: string, encoding: 'utf8'): Promise<string>
+  export function writeFile(path: string, data: string, encoding: 'utf8'): Promise<void>
+  export function mkdir(path: string, options?: { recursive?: boolean }): Promise<string | undefined>
+  export function mkdtemp(prefix: string): Promise<string>
+  export function readdir(path: string): Promise<string[]>
+  export function readdir(path: string, options: { withFileTypes: true }): Promise<DirEntry[]>
+  export function rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>
+  export function rmdir(path: string): Promise<void>
+  export function unlink(path: string): Promise<void>
+  export function symlink(target: string, path: string): Promise<void>
+}
+
+declare module 'node:path' {
+  export const sep: string
+  export function join(...parts: string[]): string
+  export function dirname(path: string): string
+  export function relative(from: string, to: string): string
+}
+
+declare module 'node:url' {
+  export function fileURLToPath(url: string | URL): string
+}
+
+declare module 'node:crypto' {
+  export function createHash(algorithm: 'sha256'): {
+    update(data: string): { digest(encoding: 'hex'): string }
+  }
+}
+
+declare module 'node:os' {
+  export function tmpdir(): string
+  export function homedir(): string
+}
+
+declare module 'node:child_process' {
+  export type ChildProcess = {
+    stdout: { on(event: 'data', listener: (chunk: { toString(): string }) => void): void } | null
+    on(event: 'close', listener: (code: number | null) => void): void
+    on(event: 'error', listener: (error: Error) => void): void
+    kill(signal?: string): boolean
+  }
+  export function spawn(
+    command: string,
+    args: readonly string[],
+    options: { stdio: readonly ('ignore' | 'pipe')[] }
+  ): ChildProcess
+}
+
+declare const process: { env: Record<string, string | undefined> }
