@@ -51,7 +51,19 @@ Installing writes one real copy of `SKILL.md` into each harness that is present 
 
 A harness whose home folder is absent is skipped. Nothing else is written.
 
-The plugin records every file it wrote with its SHA-256. **Remove** deletes only the files it wrote and you did not edit, then the folders it created if they are empty. An existing `agent-network` folder it did not write, or a skills folder that is a symbolic link, is left untouched and shown as *Third-party folder*.
+The plugin records every file it wrote with its SHA-256. **Remove** deletes only the files it wrote and you did not edit, then the folders it created if they are empty. An existing `agent-network` folder is left untouched, and shown as *Third-party folder*, only if it holds a `SKILL.md` the plugin did not write, or if it (or the skills folder) is a symbolic link. An empty existing folder simply receives the file.
+
+## Uninstall
+
+1. Press **Remove** in the panel first: it deletes the copies the plugin wrote.
+2. Then uninstall the plugin with `orca plugin uninstall local.agent-network` (or the key shown by `orca plugin list`).
+
+Uninstalling the plugin deletes its storage, ledger included. Copies still on disk at that point are no longer recognized as the plugin's own and show as *Third-party folder*: delete them by hand.
+
+- `~/.claude/skills/agent-network`
+- `~/.agents/skills/agent-network`
+- `~/.grok/skills/agent-network`
+- `~/.gemini/config/skills/agent-network`
 
 ## What it can access
 
@@ -76,6 +88,7 @@ Beyond Orca's API, the worker:
 - **Agents need a permissive mode**. In an "ask" permission mode, each `send`, `check` or `reply` waits for your approval.
 - **Orca prints a "live terminal-only mailbox" warning** on every send. It is expected, and the skill tells agents to ignore it.
 - **Orca 1.4.259 reports an agent waiting for input as Waiting** rather than Blocked, and the panel shows what Orca reports.
+- **The feed scans the latest 200 messages of the whole Orca app**, so a busy multi-workspace Orca may show fewer than 20 messages for this workspace.
 - **A new harness** needs a new entry in `src/targets.ts`.
 
 ## Development

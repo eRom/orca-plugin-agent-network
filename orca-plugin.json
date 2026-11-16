@@ -25,7 +25,6 @@
     "commands": [
       { "id": "agentNetwork.installSkill", "title": "Agent network: install teammate instructions", "when": "global" },
       { "id": "agentNetwork.uninstallSkill", "title": "Agent network: remove teammate instructions", "when": "global" }
-    ],
-    "events": [{ "on": "agent.status.changed" }, { "on": "workspace.changed" }]
+    ]
   }
 }
