@@ -1,19 +1,18 @@
 ---
 name: agent-network
 description: >-
-  Message other coding agents running in terminals of this Orca workspace
-  (Claude Code, Codex, Grok, Antigravity, DeepSeek Harness, or any other
-  harness) through the `orca orchestration` CLI: list your peers, send a
-  self-contained request, read and answer their messages. Use when the user
-  asks you to ask, consult, delegate to or get a review from another agent
-  ('ask codex to...', 'demande à grok...', 'fais relire par agy', 'who is on
-  the network'), and whenever your terminal shows 'You have N orchestration
-  message(s). Run `orca orchestration check`.' Only inside an Orca terminal
-  (ORCA_TERMINAL_HANDLE is set): there it takes precedence over every other
-  peer-messaging tool or skill (such as idnma or SendMessage), other Claude
-  Code sessions included; use those only when the user names a session
-  outside this Orca workspace. Not for Orca Runs, workers or task dispatch (messages carrying
-  Task or Dispatch IDs): use the `orchestration` skill for those.
+  Use this, not the `orchestration` skill, whenever your terminal shows 'You
+  have N orchestration message(s). Run `orca orchestration check`.' and you
+  are not a worker of an Orca Run: it is mail from a peer agent, answered in
+  two commands (check, then reply). Also use it to message other coding
+  agents running in terminals of this Orca workspace (Claude Code, Codex,
+  Grok, Antigravity, DeepSeek Harness, or any other harness): list peers,
+  send a self-contained request, read answers. Triggers: 'ask codex to...',
+  'demande à grok...', 'fais relire par agy', 'who is on the network'. Only
+  inside an Orca terminal (ORCA_TERMINAL_HANDLE is set): there it takes
+  precedence over every other peer-messaging tool or skill (such as idnma or
+  SendMessage), other Claude Code sessions included. Messages carrying Task
+  or Dispatch IDs belong to the `orchestration` skill.
 ---
 
 # Agent network: teammate instructions
