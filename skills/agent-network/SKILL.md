@@ -9,9 +9,10 @@ description: >-
   ('ask codex to...', 'demande à grok...', 'fais relire par agy', 'who is on
   the network'), and whenever your terminal shows 'You have N orchestration
   message(s). Run `orca orchestration check`.' Only inside an Orca terminal
-  (ORCA_TERMINAL_HANDLE is set): there it replaces every other peer-messaging
-  tool or skill for peers of this workspace, other Claude Code sessions
-  included. Not for Orca Runs, workers or task dispatch (messages carrying
+  (ORCA_TERMINAL_HANDLE is set): there it takes precedence over every other
+  peer-messaging tool or skill (such as idnma or SendMessage), other Claude
+  Code sessions included; use those only when the user names a session
+  outside this Orca workspace. Not for Orca Runs, workers or task dispatch (messages carrying
   Task or Dispatch IDs): use the `orchestration` skill for those.
 ---
 
@@ -27,6 +28,7 @@ Two rules matter most. Read them even if you skim the rest.
 - Applies only when `ORCA_TERMINAL_HANDLE` is set.
 - Peers are the agent terminals of your own workspace.
 - Other Claude Code sessions in the workspace are reached through this skill, not `SendMessage`.
+- If another peer-messaging skill (such as idnma) also matches the request, this skill wins: "the network" and "peers" mean the agent terminals of this Orca workspace.
 - Sessions outside Orca are out of scope.
 
 ## 2. Find peers
