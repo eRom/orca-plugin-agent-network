@@ -48,7 +48,7 @@ declare module 'node:child_process' {
     on(event: 'error', listener: (error: Error) => void): void
     kill(signal?: string): boolean
   }
-  export type ExecFileOptions = { timeout?: number; maxBuffer?: number; encoding: 'utf8' }
+  export type ExecFileOptions = { timeout?: number; killSignal?: string; maxBuffer?: number; encoding: 'utf8' }
   export function execFile(
     file: string,
     args: readonly string[],
@@ -62,4 +62,8 @@ declare module 'node:child_process' {
   ): ChildProcess
 }
 
-declare const process: { env: Record<string, string | undefined> }
+declare const process: { env: Record<string, string | undefined>; execPath: string }
+
+declare module 'node:fs' {
+  export function existsSync(path: string): boolean
+}

@@ -38,7 +38,8 @@ function parseEnvelope(stdout: string): { ok?: boolean; result?: unknown; error?
 export function createOrcaRunner(binary: string, timeoutMs = 10_000): OrcaRunner {
   return (args) =>
     new Promise((resolve, reject) => {
-      execFile(binary, args, { timeout: timeoutMs, maxBuffer: MAX_BUFFER_BYTES, encoding: 'utf8' }, (failure, stdout, stderr) => {
+      // SIGKILL : un SIGTERM peut être intercepté, le délai ne serait alors pas une borne dure.
+      execFile(binary, args, { timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: MAX_BUFFER_BYTES, encoding: 'utf8' }, (failure, stdout, stderr) => {
         const execError = failure as ExecFailure | null
         if (execError?.killed) {
           reject(new OrcaCliError('timeout', `orca did not answer within ${timeoutMs} ms`))
