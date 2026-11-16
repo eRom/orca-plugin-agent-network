@@ -1,4 +1,5 @@
 // Données communes au test du panneau et à ses scénarios `orca plugin check` : aucun hôte, que des valeurs.
+import { MESSAGES } from './copy'
 import type { FeedItem, Party } from './feed'
 import type { TargetState, TargetStatus } from './installer'
 import type { AgentsView } from './protocol'
@@ -34,7 +35,7 @@ export const EMPTY_WORKSPACE_AGENTS: AgentsView = { workspace: { name: WORKSPACE
 
 const party = (handle: string, agent: string | null, title: string | null, live = true): Party => ({
   handle,
-  label: live ? (title ? `${agent ?? 'shell'} · ${title}` : (agent ?? 'shell')) : 'closed terminal',
+  label: live ? (title ? `${agent ?? MESSAGES.en.shell} · ${title}` : (agent ?? MESSAGES.en.shell)) : MESSAGES.en.closedTerminal,
   agent,
   live
 })

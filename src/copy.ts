@@ -75,6 +75,8 @@ export type Messages = {
   /** « libellé : texte » avec la typographie de la langue (espace avant les deux-points en français). */
   labelled: (label: string, text: string) => string
   retry: string
+  /** Titre de l'erreur du fil : sans lui, Orca affiche un « Attention » générique. */
+  feedUnavailableTitle: string
   refresh: string
   /** Date du message illisible : le panneau n'invente pas d'heure. */
   unknownTime: string
@@ -161,6 +163,7 @@ const fr: Messages = {
   agentsStale: 'Agents non actualisés.',
   labelled: (label, text) => `${label} : ${text}`,
   retry: 'Réessayer',
+  feedUnavailableTitle: 'Messages indisponibles',
   refresh: 'Actualiser',
   unknownTime: 'heure inconnue',
   noTargets: 'Aucun dossier de consignes à afficher.'
@@ -245,6 +248,7 @@ const en: Messages = {
   agentsStale: "Agents couldn't be refreshed.",
   labelled: (label, text) => `${label}: ${text}`,
   retry: 'Retry',
+  feedUnavailableTitle: 'Messages unavailable',
   refresh: 'Refresh',
   unknownTime: 'unknown time',
   noTargets: 'No instruction folder to show.'

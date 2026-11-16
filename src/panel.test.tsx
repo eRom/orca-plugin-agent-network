@@ -127,6 +127,9 @@ test('shows a blocked agent distinctly', async () => {
   const tones = [tone(EN.agentStates.blocked), tone(EN.agentStates.working), tone(EN.agentStates.waiting), tone(EN.agentStates.done)]
   assert.equal(tones[0], 'danger')
   assert.equal(new Set(tones).size, 4, 'one distinct tone per state')
+  // Seul le bloqué est plein : Orca dessine `accent` en pastille opaque, plus voyante qu'un `danger` en thème clair.
+  assert.equal(view.findAll({ type: 'Badge' }).some((badge) => badge.props.tone === 'accent'), false, 'no opaque accent pill anywhere')
+  assert.equal(tones[1], 'neutral')
   // Le nom de l'agent bloqué passe en gras, ceux des autres non.
   const nameWeight = (handle: string) => view.find({ testId: `agent-${handle}` })?.props
   assert.ok(nameWeight('term_claude') && nameWeight('term_codex'))
@@ -351,18 +354,22 @@ test('shows each message with its route, subject, preview and time', async () =>
   assert.equal(preview.props.truncate, true, 'and cut cleanly at the sidebar width')
   assert.equal(LONG_PREVIEW.length, 141)
   assert.notEqual(view.find({ text: EN.messageRoute(EN.unknownSender, 'grok') }), null)
-  assert.notEqual(view.find({ text: EN.messageRoute('closed terminal', 'antigravity · Docs') }), null)
+  assert.notEqual(view.find({ text: EN.messageRoute(EN.closedTerminal, 'antigravity · Docs') }), null)
   await expectClean(view)
 })
 
 test('marks unread messages and, discreetly, replies', async () => {
   const { view } = await open()
   assert.equal(view.findAll({ type: 'Badge', text: EN.unreadBadge }).length, 1)
+  assert.equal(view.find({ type: 'Badge', text: EN.unreadBadge })?.props.tone, 'neutral', 'quieter than the Blocked pill, visible on both themes')
   assert.equal(view.find({ testId: 'message-m1' })?.text.includes(EN.unreadBadge), true)
   assert.equal(view.find({ testId: 'message-m2' })?.text.includes(EN.unreadBadge), false)
   assert.equal(view.find({ testId: 'message-m2' })?.text.includes(EN.replyBadge), true)
   assert.equal(view.find({ testId: 'message-m1' })?.text.includes(EN.replyBadge), false)
   assert.equal(view.findAll({ type: 'Badge', text: EN.replyBadge }).length, 0, 'a reply is a muted word, not a badge')
+  // Le mot est dans la ligne de méta, avec l'heure : rien de cliquable à droite du sujet.
+  assert.notEqual(view.find({ type: 'Text', text: new RegExp(`^${EN.replyBadge} · `) }), null)
+  assert.equal(view.findAll({ type: 'Text', text: EN.replyBadge }).length, 0, 'never alone, which would read like an action')
   await expectClean(view)
 })
 
@@ -384,14 +391,21 @@ test('keeps agents when the feed fails, and says why', async () => {
   assert.notEqual(view.find({ type: 'Text', text: 'Reviewer' }), null)
   assert.notEqual(view.find({ type: 'Badge', text: EN.agentStates.blocked }), null)
   // ... et l'erreur du fil est visible, sans passer pour un fil vide.
-  assert.notEqual(view.find({ text: EN.feedTimeout }), null)
+  // Un Callout titré ne livre pas son corps à `text` : on le lit dans l'arbre dessiné.
+  assert.notEqual(view.find({ testId: 'feed-error' }), null)
+  assert.equal(JSON.stringify(view.tree()).includes(EN.feedTimeout), true, 'the body is unchanged')
+  assert.equal(view.find({ testId: 'feed-error' })?.props.title, EN.feedUnavailableTitle)
+  assert.equal(EN.feedUnavailableTitle, 'Messages unavailable')
+  assert.equal(FR.feedUnavailableTitle, 'Messages indisponibles')
+  // « Réessayer » a la même variante à plat que « Installer » : pas d'ombre portée.
+  assert.equal(view.find({ type: 'Button', text: EN.retry })?.props.variant, 'solid')
   assert.equal(view.find({ text: EN.noMessages }), null)
   // Réessayer relit le fil.
   state.feed = () => ({ items: FEED })
   const before = calls.feed
   await view.press({ text: EN.retry })
   assert.equal(calls.feed, before + 1)
-  assert.equal(view.find({ text: EN.feedTimeout }), null)
+  assert.equal(view.find({ testId: 'feed-error' }), null)
   assert.notEqual(view.find({ text: UNREAD_MESSAGE.subject }), null)
   await expectClean(view)
 })

@@ -217,11 +217,11 @@ async function runAction(kind: 'install' | 'uninstall'): Promise<void> {
 // --- Présentation -----------------------------------------------------------------------------------------------
 
 /**
- * Un badge par état. Le bloqué est le seul en `danger` : c'est lui qu'on doit voir, et son nom passe en gras.
- * L'attente est en `warning`, le travail en `accent`, le terminé en `success` : quatre teintes, toutes lisibles sur le
- * thème sombre (relevé sur une capture en direct le 16/11).
+ * Un badge par état. Orca dessine `danger` plein et `accent` en pastille opaque (blanche en sombre, noire en clair) : seul le
+ * bloqué doit être plein, donc l'accent n'est utilisé nulle part. Le travail est en `neutral`, l'attente en `warning`,
+ * le terminé en `success` : trois badges discrets à contour, quatre états distincts (relevé sur les captures du 16/11).
  */
-const AGENT_STATE_TONE: Record<AgentState, Tone> = { blocked: 'danger', waiting: 'warning', working: 'accent', done: 'success' }
+const AGENT_STATE_TONE: Record<AgentState, Tone> = { blocked: 'danger', waiting: 'warning', working: 'neutral', done: 'success' }
 
 /** Teinte du libellé d'état d'une cible ; `null` = texte atténué (rien à signaler). */
 const TARGET_STATE_TONE: Record<TargetState, Tone | null> = {
@@ -338,7 +338,7 @@ function renderAgentsSection(m: Messages) {
         <Stack gap="sm">
           <Callout tone="danger">{failure}</Callout>
           <Row>
-            <Button variant="outline" size="sm" onPress={loadAgents}>
+            <Button variant="solid" size="sm" onPress={loadAgents}>
               {m.retry}
             </Button>
           </Row>
@@ -381,6 +381,7 @@ function renderMessage(m: Messages, item: FeedItem) {
         </Box>
         <Box key={`time-${item.id}`} shrink={false}>
           <Text muted size="xs">
+            {item.isReply ? `${m.replyBadge} · ` : ''}
             {item.at === 0 ? m.unknownTime : <RelativeTime at={item.at} format="short" />}
           </Text>
         </Box>
@@ -388,7 +389,7 @@ function renderMessage(m: Messages, item: FeedItem) {
       <Box key={`subject-${item.id}`} direction="row" align="center" gap="xs">
         {item.read ? null : (
           <Box key={`unread-${item.id}`} shrink={false}>
-            <Badge tone="accent">{m.unreadBadge}</Badge>
+            <Badge tone="neutral">{m.unreadBadge}</Badge>
           </Box>
         )}
         <Box key={`subject-text-${item.id}`} grow minWidth={0}>
@@ -396,13 +397,6 @@ function renderMessage(m: Messages, item: FeedItem) {
             {item.subject}
           </Text>
         </Box>
-        {item.isReply ? (
-          <Box key={`reply-${item.id}`} shrink={false}>
-            <Text muted size="xs">
-              {m.replyBadge}
-            </Text>
-          </Box>
-        ) : null}
       </Box>
       {item.preview === '' ? null : (
         <Text muted size="xs" truncate>
@@ -421,11 +415,11 @@ function renderMessagesSection(m: Messages) {
   } else if ('error' in result) {
     body = (
       <Stack gap="sm">
-        <Callout key="feed-error" tone="danger">
+        <Callout key="feed-error" tone="danger" title={m.feedUnavailableTitle}>
           {result.error}
         </Callout>
         <Row>
-          <Button variant="outline" size="sm" onPress={loadFeed}>
+          <Button variant="solid" size="sm" onPress={loadFeed}>
             {m.retry}
           </Button>
         </Row>
@@ -540,7 +534,7 @@ function renderInstructionsSection(m: Messages) {
           {status.error}
         </Callout>
         <Row>
-          <Button variant="outline" size="sm" onPress={loadStatus}>
+          <Button variant="solid" size="sm" onPress={loadStatus}>
             {m.retry}
           </Button>
         </Row>
@@ -578,7 +572,7 @@ function renderInstructionsSection(m: Messages) {
               </Button>
             ) : null}
             {removable ? (
-              <Button variant="outline" size="sm" disabled={working} onPress={() => runAction('uninstall')}>
+              <Button variant="solid" size="sm" disabled={working} onPress={() => runAction('uninstall')}>
                 {m.uninstall}
               </Button>
             ) : null}
