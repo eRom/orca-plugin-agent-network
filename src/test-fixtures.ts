@@ -116,3 +116,11 @@ export const NONE_INSTALLED: TargetStatus[] = [
   target('absent-harness', 'grok', ['grok']),
   target('not-installed', 'antigravity', ['antigravity'])
 ]
+
+/** Ce que voit quelqu'un dont les quatre dossiers `agent-network` viennent d'ailleurs : ni installation, ni retrait possibles. */
+export const ALL_FOREIGN: TargetStatus[] = [
+  target('foreign', 'claude', ['claude']),
+  target('foreign', 'shared', ['codex', 'dsh']),
+  target('foreign', 'grok', ['grok']),
+  target('foreign', 'antigravity', ['antigravity'])
+]

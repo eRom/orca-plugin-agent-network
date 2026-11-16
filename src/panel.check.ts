@@ -2,6 +2,7 @@
 // aucun hôte réel, aucun disque, aucun appel à `orca`.
 import { defineCheck } from 'orca/testing'
 import {
+  ALL_FOREIGN,
   ALL_INSTALLED,
   EMPTY_WORKSPACE_AGENTS,
   FEED,
@@ -58,6 +59,15 @@ export default defineCheck({
       'network.agents': LIVE_AGENTS,
       'network.feed': { error: "Orca isn't answering: couldn't read the messages in time." },
       'skill.status': { targets: NONE_INSTALLED }
+    }
+  },
+  // Quatre dossiers tiers : aucun bouton, une seule phrase d'explication sous la liste.
+  allThirdParty: {
+    requests: {
+      'locale.set': LOCALE_OK,
+      'network.agents': LIVE_AGENTS,
+      'network.feed': { items: FEED },
+      'skill.status': { targets: ALL_FOREIGN }
     }
   },
   // Une cible de chaque état des consignes (installé, à mettre à jour, modifié, tiers, harnais absent, non installé).

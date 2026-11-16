@@ -25,6 +25,9 @@ const HARNESS_NAMES: Record<string, string> = {
 /** Nom affichable d'un harnais ; un identifiant inconnu s'affiche tel quel. */
 export const harnessName = (id: string): string => HARNESS_NAMES[id] ?? id
 
+/** Nom court d'un harnais, pour les lignes étroites du panneau : « DSH » pour DeepSeek Harness. */
+export const harnessShortName = (id: string): string => (id === 'dsh' ? 'DSH' : harnessName(id))
+
 export type Messages = {
   // Fil des messages : libellés des parties absentes de la liste des terminaux du workspace.
   /** Un terminal fermé, ou d'un autre workspace : le CLI ne permet pas de les distinguer. */
@@ -45,7 +48,7 @@ export type Messages = {
   // Libellés d'états.
   agentStates: Record<AgentState, string>
   targetStates: Record<TargetState, string>
-  /** Une phrase par état de cible, pour dire en clair ce que le plugin fera (ou ne fera pas) de ce dossier. */
+  /** Une demi-phrase par état de cible (minuscule, sans libellé), à lire après le libellé via `labelled`. */
   targetStateHints: Record<TargetState, string>
   installOutcomes: Record<InstallOutcome, string>
   uninstallOutcomes: Record<UninstallOutcome, string>
@@ -67,7 +70,10 @@ export type Messages = {
   update: string
   uninstall: string
   loading: string
-  loadFailedTitle: string
+  /** Les agents n'ont pas pu être relus : ceux déjà affichés restent, ce message le dit sans alarmer. */
+  agentsStale: string
+  /** « libellé : texte » avec la typographie de la langue (espace avant les deux-points en français). */
+  labelled: (label: string, text: string) => string
   retry: string
   refresh: string
   /** Date du message illisible : le panneau n'invente pas d'heure. */
@@ -113,12 +119,12 @@ const fr: Messages = {
     'not-installed': 'Non installé'
   },
   targetStateHints: {
-    installed: 'À jour.',
-    outdated: 'Une version plus récente est disponible.',
-    modified: 'Tu as modifié ce fichier : il est laissé tel quel.',
-    foreign: "Un dossier agent-network qui n'a pas été écrit par ce plugin : il est laissé tel quel.",
-    'absent-harness': 'Harnais introuvable sur ce Mac.',
-    'not-installed': 'Pas encore installé.'
+    installed: 'à jour.',
+    outdated: 'installé par ce plugin, une version plus récente est prête.',
+    modified: 'tu as changé le fichier, il est laissé tel quel.',
+    foreign: "un dossier agent-network que ce plugin n'a pas écrit, laissé tel quel.",
+    'absent-harness': 'rien à installer pour lui.',
+    'not-installed': 'prêt à installer.'
   },
   installOutcomes: {
     written: 'Installé',
@@ -152,7 +158,8 @@ const fr: Messages = {
   update: 'Mettre à jour',
   uninstall: 'Retirer',
   loading: 'Chargement',
-  loadFailedTitle: 'Chargement impossible',
+  agentsStale: 'Agents non actualisés.',
+  labelled: (label, text) => `${label} : ${text}`,
   retry: 'Réessayer',
   refresh: 'Actualiser',
   unknownTime: 'heure inconnue',
@@ -196,12 +203,12 @@ const en: Messages = {
     'not-installed': 'Not installed'
   },
   targetStateHints: {
-    installed: 'Up to date.',
-    outdated: 'A newer version is available.',
-    modified: 'You edited this file: it is left untouched.',
-    foreign: 'An agent-network folder not written by this plugin: left untouched.',
-    'absent-harness': 'Harness not found on this Mac.',
-    'not-installed': 'Not installed yet.'
+    installed: 'up to date.',
+    outdated: 'installed by this plugin, a newer version is ready.',
+    modified: 'you changed the file, left untouched.',
+    foreign: 'an agent-network folder not written by this plugin, left untouched.',
+    'absent-harness': 'nothing to install for it.',
+    'not-installed': 'ready to install.'
   },
   installOutcomes: {
     written: 'Installed',
@@ -235,7 +242,8 @@ const en: Messages = {
   update: 'Update',
   uninstall: 'Remove',
   loading: 'Loading',
-  loadFailedTitle: "Couldn't load",
+  agentsStale: "Agents couldn't be refreshed.",
+  labelled: (label, text) => `${label}: ${text}`,
   retry: 'Retry',
   refresh: 'Refresh',
   unknownTime: 'unknown time',

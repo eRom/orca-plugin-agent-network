@@ -25,7 +25,7 @@ import {
   type ReadonlyAtom,
   type Tone
 } from 'orca'
-import { harnessName, messagesFor, type Messages } from './copy'
+import { harnessName, harnessShortName, messagesFor, type Messages } from './copy'
 import type { FeedItem } from './feed'
 import { agentIcon } from './icons'
 import type { InstallReport, TargetState, UninstallReport } from './installer'
@@ -109,22 +109,29 @@ const loadAll = (): Promise<unknown> => Promise.all([loadAgents(), loadFeed(), l
 
 /** Tourne une fois avant le premier rendu ; ce qui est poussé dans `subscriptions` s'arrête avec le panneau. */
 export function setup(ctx: PanelContext): void {
+  // Un nouveau panneau repart sans workspace connu : la première notification n'est pas un changement.
+  lastWorkspaceId = undefined
   const timers = new Set<ReturnType<typeof setTimeout>>()
   /** Relance `load` dans `delay` ms ; une rafale d'appels ne fait qu'une lecture, à la fin. */
-  const debounced = (load: () => Promise<void>, delay: number) => {
+  const debounced = (load: () => Promise<unknown>, delay: number) => {
     let pending: ReturnType<typeof setTimeout> | undefined
     return () => {
-      if (pending !== undefined) clearTimeout(pending)
-      pending = setTimeout(() => {
-        timers.delete(pending!)
+      if (pending !== undefined) {
+        clearTimeout(pending)
+        timers.delete(pending)
+      }
+      const handle = setTimeout(() => {
+        timers.delete(handle)
         pending = undefined
         void load()
       }, delay)
-      timers.add(pending)
+      pending = handle
+      timers.add(handle)
     }
   }
   const scheduleAgents = debounced(loadAgents, AGENTS_DEBOUNCE_MS)
   const scheduleFeed = debounced(loadFeed, FEED_DEBOUNCE_MS)
+  const scheduleAll = debounced(loadAll, AGENTS_DEBOUNCE_MS)
 
   ctx.subscriptions.push(
     on('agent.status.changed', () => {
@@ -135,16 +142,30 @@ export function setup(ctx: PanelContext): void {
   ctx.subscriptions.push(
     on('workspace.changed', ({ context }) => {
       const workspaceId = context?.workspaceId ?? null
-      // Un autre workspace : on ne montre pas, même un instant, les agents et le fil du précédent.
-      if (lastWorkspaceId !== undefined && workspaceId !== lastWorkspaceId) {
-        set(agentsView, null)
-        set(feedResult, null)
+      // Orca livre le contexte courant dès l'abonnement : les lectures d'ouverture l'ont déjà vu, on le retient seulement.
+      if (lastWorkspaceId === undefined) {
+        lastWorkspaceId = workspaceId
+        return
       }
+      if (workspaceId === lastWorkspaceId) {
+        // Même workspace (terminal ouvert, fermé ou renommé) : on garde l'affichage et on relit après la rafale.
+        scheduleAll()
+        return
+      }
+      // Un autre workspace : on ne montre pas, même un instant, les agents et le fil du précédent.
       lastWorkspaceId = workspaceId
+      set(agentsView, null)
+      set(feedResult, null)
       void loadAll()
     })
   )
-  ctx.subscriptions.push(plugin.on('skill.changed', ({ targets }) => set(statusResult, { targets })))
+  ctx.subscriptions.push(
+    plugin.on('skill.changed', ({ targets }) => {
+      // Une lecture d'état encore en vol est plus ancienne que ce que le worker vient d'annoncer : on la jette.
+      latest.status++
+      set(statusResult, { targets })
+    })
+  )
 
   // Le minuteur tourne tant que le panneau existe, mais ne lit rien tant qu'on ne le voit pas.
   const visible: ReadonlyAtom<boolean> = ctx.visible
@@ -159,7 +180,6 @@ export function setup(ctx: PanelContext): void {
     }
   })
 
-  lastWorkspaceId = undefined
   // D'abord la langue : le worker n'en a pas, il parle la dernière annoncée (erreurs du fil, retour des actions).
   // Un échec est sans gravité : il garde la précédente, l'anglais au départ.
   void plugin
@@ -188,9 +208,9 @@ async function runAction(kind: 'install' | 'uninstall'): Promise<void> {
 // --- Présentation -----------------------------------------------------------------------------------------------
 
 /**
- * Un badge par état. Le bloqué est le seul en `danger` (et sa ligne est encadrée en danger) : c'est lui qu'on doit voir.
+ * Un badge par état. Le bloqué est le seul en `danger` : c'est lui qu'on doit voir, et son nom passe en gras.
  * L'attente est en `warning`, le travail en `accent`, le terminé en `success` : quatre teintes, toutes lisibles sur le
- * thème sombre (le badge `neutral` y disparaît sur un fond `muted`, d'où aucun état en neutre).
+ * thème sombre (relevé sur une capture en direct le 16/11).
  */
 const AGENT_STATE_TONE: Record<AgentState, Tone> = { blocked: 'danger', waiting: 'warning', working: 'accent', done: 'success' }
 
@@ -204,17 +224,20 @@ const TARGET_STATE_TONE: Record<TargetState, Tone | null> = {
   'not-installed': null
 }
 
+/** Ordre des phrases d'explication sous la liste des cibles : ce que l'utilisateur peut agir d'abord. */
+const NOTE_ORDER: readonly TargetState[] = ['outdated', 'modified', 'foreign', 'absent-harness', 'not-installed']
+
 /** Largeur de l'emplacement de tête d'une ligne : icône ou monogramme y tiennent, les noms s'alignent. */
 const LEAD_SLOT_WIDTH = 20
 
 /**
- * Sans icône, une pastille ronde porte l'initiale du nom. Elle est posée sur la surface `card`, l'inverse du fond
- * `muted` des groupes : un Badge ou une puce `muted` s'y confondent sur le thème sombre (constaté le 15/11).
+ * Sans icône, une pastille ronde porte l'initiale du nom. Les lignes sont posées à même le fond du volet : la pastille
+ * prend la surface `muted` (la surface `card` se confond avec ce fond sur le thème sombre, constaté le 15/11).
  */
 function renderMonogram(id: string, name: string) {
   const initial = Array.from(name.trim())[0]
   return (
-    <Box key={`monogram-${id}`} width={LEAD_SLOT_WIDTH} height={LEAD_SLOT_WIDTH} radius="full" background="card" align="center" justify="center">
+    <Box key={`monogram-${id}`} width={LEAD_SLOT_WIDTH} height={LEAD_SLOT_WIDTH} radius="full" background="muted" align="center" justify="center">
       <Text size="xs" weight="medium">
         {initial ? initial.toUpperCase() : '?'}
       </Text>
@@ -229,6 +252,11 @@ function renderLead(id: string, name: string, agent: string | null) {
       {icon === null ? renderMonogram(id, name) : <Image src={icon} alt="" size="xs" />}
     </Box>
   )
+}
+
+/** Lignes à plat, pleine largeur, séparées par un filet : le rendu d'une liste native du volet d'Orca, sans carte. */
+function renderRuled(rows: { key: string; node: OrcaNode }[]) {
+  return <Stack gap="none">{rows.flatMap((row, index) => (index === 0 ? [row.node] : [<Separator key={`rule-${row.key}`} />, row.node]))}</Stack>
 }
 
 /** Titre de la section : son nom, un complément atténué, et à droite ce que l'appelant y met. */
@@ -256,19 +284,10 @@ function renderAgentRow(m: Messages, agent: AgentsView['agents'][number]) {
   const harness = agent.agent === null ? null : harnessName(agent.agent)
   const name = agent.title ?? harness ?? m.unnamedAgent
   return (
-    <Box
-      key={`agent-${agent.handle}`}
-      direction="row"
-      align="center"
-      gap="sm"
-      padding="sm"
-      radius="md"
-      background="muted"
-      border={agent.state === 'blocked' ? 'danger' : true}
-    >
+    <Box key={`agent-${agent.handle}`} direction="row" align="center" gap="sm" paddingY="sm">
       {renderLead(agent.handle, name, agent.agent)}
       <Box key={`text-${agent.handle}`} grow minWidth={0}>
-        <Text weight="medium" truncate>
+        <Text weight={agent.state === 'blocked' ? 'semibold' : 'medium'} truncate>
           {name}
         </Text>
         <Text muted size="xs" truncate>
@@ -309,7 +328,21 @@ function renderAgentsSection(m: Messages) {
       </Text>
     )
   } else {
-    body = <Stack gap="xs">{view.agents.map((agent) => renderAgentRow(m, agent))}</Stack>
+    body = (
+      <Stack gap="xs">
+        {renderRuled(view.agents.map((agent) => ({ key: agent.handle, node: renderAgentRow(m, agent) })))}
+        {failure === null ? null : (
+          <Row key="agents-stale" align="center" gap="sm">
+            <Text muted size="xs">
+              {m.agentsStale}
+            </Text>
+            <Button variant="ghost" size="sm" onPress={loadAgents}>
+              {m.retry}
+            </Button>
+          </Row>
+        )}
+      </Stack>
+    )
   }
   return (
     <Stack gap="sm">
@@ -322,7 +355,7 @@ function renderAgentsSection(m: Messages) {
 function renderMessage(m: Messages, item: FeedItem) {
   const route = m.messageRoute(item.from === null ? m.unknownSender : item.from.label, item.to.label)
   return (
-    <Box key={`message-${item.id}`} gap="xs">
+    <Box key={`message-${item.id}`} gap="xs" paddingY="sm">
       <Box key={`meta-${item.id}`} direction="row" align="center" gap="sm">
         <Box key={`route-${item.id}`} grow minWidth={0}>
           <Text muted size="xs" truncate>
@@ -388,11 +421,7 @@ function renderMessagesSection(m: Messages) {
       </Text>
     )
   } else {
-    body = (
-      <Box border radius="md" padding="sm" gap="sm" background="muted">
-        {result.items.flatMap((item, index) => (index === 0 ? [renderMessage(m, item)] : [<Separator key={`rule-${item.id}`} />, renderMessage(m, item)]))}
-      </Box>
-    )
+    body = renderRuled(result.items.map((item) => ({ key: item.id, node: renderMessage(m, item) })))
   }
   return (
     <Stack gap="sm">
@@ -402,42 +431,40 @@ function renderMessagesSection(m: Messages) {
   )
 }
 
-/** Une ligne par cible : harnais servis, libellé d'état en couleur, puis la phrase qui dit ce que le plugin en fait. */
+/** « Claude Code », « Codex · DSH » : assez court pour tenir sur une ligne à 360 px. */
+const targetLabel = (harnesses: readonly string[]): string => harnesses.map(harnessShortName).join(' · ')
+
+/** Une ligne par cible, sur une seule ligne : harnais servis, libellé d'état à droite. L'explication se lit sous la liste. */
 function renderTarget(m: Messages, target: StatusResult['targets'][number], index: number) {
   const key = `target-${index}-${target.target}`
   const tone = TARGET_STATE_TONE[target.state]
   return (
-    <Box key={key} gap="xs" padding="sm" radius="md" border background="muted">
-      <Box key={`head-${key}`} direction="row" align="center" gap="sm">
-        {target.harnesses.map((harness) => renderLead(`${key}-${harness}`, harnessName(harness), harness))}
-        <Box key={`names-${key}`} grow minWidth={0}>
-          <Text weight="medium" truncate>
-            {target.harnesses.map(harnessName).join(', ')}
-          </Text>
-        </Box>
-        <Box key={`state-${key}`} shrink={false}>
-          {tone === null ? (
-            <Text muted size="xs">
-              {m.targetStates[target.state]}
-            </Text>
-          ) : (
-            <Text tone={tone} size="xs" weight="medium">
-              {m.targetStates[target.state]}
-            </Text>
-          )}
-        </Box>
+    <Box key={key} direction="row" align="center" gap="sm" paddingY="sm">
+      {target.harnesses.map((harness) => renderLead(`${key}-${harness}`, harnessName(harness), harness))}
+      <Box key={`names-${key}`} grow minWidth={0}>
+        <Text weight="medium" truncate>
+          {targetLabel(target.harnesses)}
+        </Text>
       </Box>
-      <Text muted size="xs">
-        {m.targetStateHints[target.state]}
-      </Text>
+      <Box key={`state-${key}`} shrink={false}>
+        {tone === null ? (
+          <Text muted size="xs">
+            {m.targetStates[target.state]}
+          </Text>
+        ) : (
+          <Text tone={tone} size="xs" weight="medium">
+            {m.targetStates[target.state]}
+          </Text>
+        )}
+      </Box>
     </Box>
   )
 }
 
-/** Noms affichés des harnais d'une cible, d'après l'état connu ; l'identifiant de la cible à défaut. */
-function targetNames(status: StatusResult | null, id: string): string {
+/** Libellé d'une cible d'après l'état connu ; l'identifiant de la cible à défaut. */
+function targetName(status: StatusResult | null, id: string): string {
   const known = status?.targets.find((target) => target.target === id)
-  return known === undefined ? id : known.harnesses.map(harnessName).join(', ')
+  return known === undefined ? id : targetLabel(known.harnesses)
 }
 
 function renderFeedback(m: Messages, current: Feedback, status: StatusResult | null) {
@@ -452,18 +479,17 @@ function renderFeedback(m: Messages, current: Feedback, status: StatusResult | n
     current.kind === 'install'
       ? current.report.results.map((result) => ({
           key: result.target,
-          outcome: result.outcome,
           bad: result.outcome === 'failed',
-          warn: result.outcome !== 'written' && result.outcome !== 'updated' && result.outcome !== 'unchanged',
-          text: `${targetNames(status, result.target)}: ${m.installOutcomes[result.outcome]}`,
+          // Un harnais absent n'est pas un problème : seuls un échec ou un dossier laissé tel quel inquiètent.
+          warn: result.outcome === 'skipped-modified' || result.outcome === 'skipped-foreign',
+          text: m.labelled(targetName(status, result.target), m.installOutcomes[result.outcome]),
           error: result.error
         }))
       : current.report.results.map((result) => ({
           key: result.target,
-          outcome: result.outcome,
           bad: result.outcome === 'failed',
           warn: result.outcome === 'kept-modified',
-          text: `${targetNames(status, result.target)}: ${m.uninstallOutcomes[result.outcome]}`,
+          text: m.labelled(targetName(status, result.target), m.uninstallOutcomes[result.outcome]),
           error: result.error
         }))
   if (lines.length === 0) return null
@@ -511,19 +537,34 @@ function renderInstructionsSection(m: Messages) {
     const states = status.targets.map((target) => target.state)
     const installable = states.some((state) => state === 'not-installed' || state === 'outdated')
     const removable = states.some((state) => state === 'installed' || state === 'outdated')
+    // Une phrase par état distinct (et pas par ligne) : quatre dossiers tiers ne répètent pas quatre fois la même.
+    const notes = NOTE_ORDER.filter((state) => states.includes(state))
     body = (
       <Stack gap="sm">
-        <Stack gap="xs">{status.targets.map((target, index) => renderTarget(m, target, index))}</Stack>
-        <Row gap="sm" align="center">
-          {installable ? (
-            <Button variant="solid" size="sm" disabled={working} onPress={() => runAction('install')}>
-              {states.includes('outdated') ? m.update : m.install}
-            </Button>
-          ) : null}
-          <Button variant="outline" size="sm" disabled={working || !removable} onPress={() => runAction('uninstall')}>
-            {m.uninstall}
-          </Button>
-        </Row>
+        {renderRuled(status.targets.map((target, index) => ({ key: `${index}-${target.target}`, node: renderTarget(m, target, index) })))}
+        {notes.length === 0 ? null : (
+          <Stack key="state-notes" gap="xs">
+            {notes.map((state) => (
+              <Text key={`note-${state}`} muted size="xs">
+                {m.labelled(m.targetStates[state], m.targetStateHints[state])}
+              </Text>
+            ))}
+          </Stack>
+        )}
+        {installable || removable ? (
+          <Row key="actions" gap="sm" align="center">
+            {installable ? (
+              <Button variant="solid" size="sm" disabled={working} onPress={() => runAction('install')}>
+                {states.includes('outdated') ? m.update : m.install}
+              </Button>
+            ) : null}
+            {removable ? (
+              <Button variant="outline" size="sm" disabled={working} onPress={() => runAction('uninstall')}>
+                {m.uninstall}
+              </Button>
+            ) : null}
+          </Row>
+        ) : null}
         {current === null ? null : renderFeedback(m, current, status)}
       </Stack>
     )
