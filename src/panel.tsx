@@ -451,18 +451,15 @@ function renderMessagesSection(m: Messages) {
 /** « Claude Code », « Codex · DSH » : assez court pour tenir sur une ligne à 360 px. */
 const targetLabel = (harnesses: readonly string[]): string => harnesses.map(harnessShortName).join(' · ')
 
-/** Place de deux icônes sur toutes les lignes de cibles : les libellés restent alignés, que la cible serve un ou deux harnais. */
-const TARGET_ICON_SLOT_WIDTH = 2 * LEAD_SLOT_WIDTH + 8
-
-/** Une ligne par cible, sur une seule ligne : harnais servis, libellé d'état à droite. L'explication se lit sous la liste. */
+/** Une ligne par cible, sur une seule ligne : icône, harnais servis, libellé d'état à droite. L'explication se lit sous la liste. */
 function renderTarget(m: Messages, target: StatusResult['targets'][number], index: number) {
   const key = `target-${index}-${target.target}`
   const tone = TARGET_STATE_TONE[target.state]
   return (
     <Box key={key} direction="row" align="center" gap="sm" paddingY="sm">
-      <Box key={`icons-${key}`} width={TARGET_ICON_SLOT_WIDTH} shrink={false} direction="row" align="center" gap="xs">
-        {target.harnesses.map((harness) => renderLead(`${key}-${harness}`, harnessName(harness), harness))}
-      </Box>
+      {/* Un seul emplacement d'icône, de la largeur de celui des agents : les libellés s'alignent d'une section à l'autre.
+          Une cible partagée montre l'icône de son premier harnais, son libellé nomme les deux. */}
+      {renderLead(key, targetLabel(target.harnesses), target.harnesses[0] ?? null)}
       <Box key={`names-${key}`} grow minWidth={0}>
         <Text weight="medium" truncate>
           {targetLabel(target.harnesses)}

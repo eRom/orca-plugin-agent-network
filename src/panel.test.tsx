@@ -1,6 +1,6 @@
 // Le panneau Network tourne ici avec le vrai runtime d'Orca ; le worker est remplacé par des réponses simulées.
 import { mock } from 'node:test'
-import { assert, mockHost, mount, test } from 'orca/testing'
+import { afterEach, assert, mockHost, mount, test } from 'orca/testing'
 import { MESSAGES } from './copy'
 import type { InstallReport, UninstallReport } from './installer'
 import * as panel from './panel'
@@ -33,6 +33,20 @@ type Setup = {
   locale?: string
   visible?: boolean
 }
+
+/** Panneaux montés par le test en cours : démontés après lui, même si une assertion a échoué avant `expectClean`. */
+const mounted: { unmount(): Promise<void> }[] = []
+
+afterEach(async () => {
+  // Sans cela, un test qui échoue laisse l'intervalle de relève du panneau en vie et `orca plugin test` ne rend pas la main.
+  for (const view of mounted.splice(0)) {
+    try {
+      await view.unmount()
+    } catch {
+      // Déjà démonté par `expectClean` : rien à faire.
+    }
+  }
+})
 
 /** Ce que le panneau a demandé au worker simulé, et ce que le worker simulé répond maintenant. */
 async function open(setup: Setup = {}) {
@@ -77,6 +91,7 @@ async function open(setup: Setup = {}) {
     }
   })
   const view = await mount(panel, { host, theme: setup.theme, locale: setup.locale ?? 'en-US', visible: setup.visible })
+  mounted.push(view)
   return { view, state, calls, requestOrder, locales }
 }
 
@@ -412,10 +427,12 @@ test('shows one dense line per target, and explains each distinct non-installed 
   assert.equal(view.find({ text: EN.labelled(EN.targetStates.installed, EN.targetStateHints.installed) }), null)
   assert.match(EN.targetStateHints.foreign, /not written by this plugin, left untouched/)
   assert.match(EN.targetStateHints.modified, /you changed the file, left untouched/)
-  // Une cible partagée tient sur une ligne : « Codex · DSH », avec ses deux icônes.
+  // Une cible partagée tient sur une ligne : « Codex · DSH ».
   assert.equal(view.find({ type: 'Text', text: 'Codex · DSH' })?.props.truncate, true)
+  // La cible partagée ne montre que l'icône de Codex, son libellé nomme les deux harnais.
   const sources = view.findAll({ type: 'Image' }).map((image) => image.props.src)
-  assert.ok(sources.includes('agent-icons/dsh.png') && sources.includes('agent-icons/codex.png'))
+  assert.ok(sources.includes('agent-icons/codex.png'))
+  assert.equal(sources.includes('agent-icons/dsh.png'), false)
   await expectClean(view)
 })
 
@@ -643,12 +660,14 @@ test('a failed reload with an empty agent list says so, with Retry, instead of s
   await expectClean(view)
 })
 
-test('every target row reserves the same icon slot, so labels align whether a target has one or two icons', async () => {
+test('every agent row and every target row use the same icon slot width, so labels align across sections', async () => {
   const { view } = await open({ status: () => ({ targets: ONE_TARGET_OF_EACH_STATE }) })
   // `findAll` ne rend que les éléments les plus internes : on retrouve chaque emplacement par sa clé.
-  const slots = ONE_TARGET_OF_EACH_STATE.map((entry, index) => view.find({ testId: `icons-target-${index}-${entry.target}` }))
-  assert.equal(slots.filter((slot) => slot !== null).length, ONE_TARGET_OF_EACH_STATE.length)
+  const agentSlots = LIVE_AGENTS.agents.filter((agent) => agent.agent !== 'kimi').map((agent) => view.find({ testId: `lead-${agent.handle}` }))
+  const targetSlots = ONE_TARGET_OF_EACH_STATE.map((entry, index) => view.find({ testId: `lead-target-${index}-${entry.target}` }))
+  const slots = [...agentSlots, ...targetSlots]
+  assert.equal(slots.filter((slot) => slot !== null).length, 4 + ONE_TARGET_OF_EACH_STATE.length)
   assert.equal(new Set(slots.map((slot) => slot?.props.width)).size, 1)
-  assert.equal(slots.every((slot) => typeof slot?.props.width === 'number' && slot.props.width >= 2 * 20), true)
+  assert.equal(typeof slots[0]?.props.width, 'number')
   await expectClean(view)
 })
