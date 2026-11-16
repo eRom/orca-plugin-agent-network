@@ -3,14 +3,14 @@ name: agent-network
 description: >-
   Use this, not the `orchestration` skill, whenever your terminal shows 'You
   have N orchestration message(s). Run `orca orchestration check`.' and you
-  are not a worker of an Orca Run: it is mail from a peer agent, answered in
-  two commands (check, then reply). Also use it to message other coding
+  are not a worker or coordinator of an Orca Run: it is mail from a peer
+  agent, picked up with one check and answered with one reply. Also use it to message other coding
   agents running in terminals of this Orca workspace (Claude Code, Codex,
   Grok, Antigravity, DeepSeek Harness, or any other harness): list peers,
   send a self-contained request, read answers. Triggers: 'ask codex to...',
   'demande à grok...', 'fais relire par agy', 'who is on the network'. Only
   inside an Orca terminal (ORCA_TERMINAL_HANDLE is set): there it takes
-  precedence over every other peer-messaging tool or skill (such as idnma or
+  precedence over every other peer-messaging tool or skill (such as
   SendMessage), other Claude Code sessions included. Messages carrying Task
   or Dispatch IDs belong to the `orchestration` skill.
 ---
@@ -27,14 +27,16 @@ Two rules matter most. Read them even if you skim the rest.
 - Applies only when `ORCA_TERMINAL_HANDLE` is set.
 - Peers are the agent terminals of your own workspace.
 - Other Claude Code sessions in the workspace are reached through this skill, not `SendMessage`.
-- If another peer-messaging skill (such as idnma) also matches the request, this skill wins: "the network" and "peers" mean the agent terminals of this Orca workspace.
+- If another peer-messaging skill also matches the request, this skill wins: "the network" and "peers" mean the agent terminals of this Orca workspace.
 - Sessions outside Orca are out of scope.
 
 ## 2. Find peers
 
 ```
-orca terminal list --worktree active --json
+orca terminal list --worktree "id:$ORCA_WORKTREE_ID" --json
 ```
+
+- Always use this selector: it names your own workspace whatever your current directory is.
 
 - Keep only the entries of `result.terminals` that carry `agentIdentity`.
 - Drop your own terminal (`$ORCA_TERMINAL_HANDLE`).
@@ -54,7 +56,9 @@ orca orchestration send --to <handle> --subject '<short subject>' --body '<brief
   2. the context (absolute paths, what is settled, what is excluded);
   3. the expected deliverable.
 - Large content goes in a file; the brief gives its absolute path.
-- The `legacy_terminal_recipient` warning is expected: ignore it.
+- Never start your own subject with `Re: `: the peer would take it for an answer and stay silent.
+- The warning "… is a live terminal-only mailbox … prefer run:<id> or dispatch:<id>" is expected: ignore it, do not report it.
+- A warning that the message is queued because the peer "has not settled at its prompt" means the peer is busy or blocked on a dialog: tell the user the message is waiting, then stop.
 - Then tell the user whom you asked what, and stop. No polling, no `sleep`, no `check --wait`. The answer arrives as a pointer typed into your terminal.
 
 ## 4. When woken
