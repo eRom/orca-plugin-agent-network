@@ -7,6 +7,30 @@
   "author": { "name": "Romain Ecarnot", "url": "https://github.com/eRom" },
   "repository": "https://github.com/eRom/orca-plugin-agent-network",
   "license": "MIT",
+  "icon": "media/icon.png",
+  "cover": {
+    "path": "media/cover.png",
+    "alt": "The Network panel listing five agents of different harnesses and their messages, beside a Claude Code prompt asking Codex for a review."
+  },
+  "screenshots": [
+    {
+      "path": "media/screenshot-dark.png",
+      "alt": "The dark Network panel: five agents with Working, Waiting and Done states above the feed of messages they exchanged.",
+      "caption": "Every agent, one network",
+      "theme": "dark"
+    },
+    {
+      "path": "media/screenshot-light.png",
+      "alt": "The same Network panel in Orca's light theme.",
+      "caption": "Follows Orca's theme",
+      "theme": "light"
+    },
+    {
+      "path": "media/screenshot-install.png",
+      "alt": "The Instructions section showing the teammate skill installed for Claude Code, Codex and DSH, Grok and Antigravity.",
+      "caption": "One click teaches every harness"
+    }
+  ],
   "engines": {
     "orca": ">=1.4.248"
   },

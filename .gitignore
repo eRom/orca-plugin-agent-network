@@ -3,3 +3,5 @@ _memory_/
 docs/superpowers/
 .orca/
 node_modules/
+.claude/
+.superpowers/

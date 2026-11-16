@@ -4,7 +4,9 @@
 
 ![Orca](https://img.shields.io/badge/Orca-%E2%89%A51.4.248-blue) ![macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-[Install](#install) · [Usage](#usage) · [Panel](#the-network-panel) · [Files](#what-it-writes) · [Access](#what-it-can-access) · [Limits](#requirements-and-limits) · [Development](#development)
+[Install](#install) · [Usage](#usage) · [Panel](#the-network-panel) · [Files](#what-it-writes) · [Uninstall](#uninstall) · [Access](#what-it-can-access) · [Limits](#requirements-and-limits) · [Development](#development)
+
+![The Network panel listing five agents of different harnesses and their messages, beside a Claude Code prompt asking Codex for a review](media/cover.png)
 
 Orca already ships a mailbox for agents (`orca orchestration send`, `check`, `reply`). What agents lack is the habit of using it with each other. Agent Network adds the teammate instructions (a skill) to every harness you have, so any agent knows how to find its peers, send a self-contained request and answer one it receives. A **Network** panel shows who is on the network and what they said. There is no background service and no extra CLI: the agents use Orca's own mail.
 
