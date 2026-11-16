@@ -4,7 +4,8 @@ import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assert, test } from 'orca/testing'
-import { agentIcon, ICON_VARIANTS, ICONED_AGENTS, themedIcon } from './icons'
+import { harnessName } from './copy'
+import { agentIcon, canonicalAgentId, ICON_VARIANTS, ICONED_AGENTS, themedIcon } from './icons'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 
@@ -34,4 +35,14 @@ test('an agent without a shipped icon has none, so the panel draws a monogram', 
   assert.equal(agentIcon(null, 'dark'), null)
   assert.equal(agentIcon('codex', 'light'), 'agent-icons/on-light/codex.png')
   assert.equal(agentIcon('codex', 'dark'), 'agent-icons/codex.png')
+})
+
+test('an agent reported as dsh-tui is canonicalized to dsh, an unknown id is unchanged', () => {
+  assert.equal(canonicalAgentId('dsh-tui'), 'dsh')
+  assert.equal(canonicalAgentId('dsh'), 'dsh')
+  assert.equal(canonicalAgentId('kimi'), 'kimi')
+  assert.equal(canonicalAgentId(null), null)
+  assert.equal(agentIcon('dsh-tui', 'dark'), 'agent-icons/dsh.png')
+  assert.equal(harnessName('dsh-tui'), 'DeepSeek Harness')
+  assert.equal(harnessName('kimi'), 'kimi')
 })

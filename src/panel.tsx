@@ -572,7 +572,7 @@ function renderInstructionsSection(m: Messages) {
               </Button>
             ) : null}
             {removable ? (
-              <Button variant="ghost" size="sm" disabled={working} onPress={() => runAction('uninstall')}>
+              <Button variant="outline" size="sm" disabled={working} onPress={() => runAction('uninstall')}>
                 {m.uninstall}
               </Button>
             ) : null}

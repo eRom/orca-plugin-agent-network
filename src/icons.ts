@@ -25,6 +25,16 @@ export function themedIcon(iconPath: string, colorScheme: ColorScheme): string {
 
 /** Icône d'un agent pour le thème, ou `null` quand on n'en livre pas (le panneau dessine alors un monogramme). */
 export function agentIcon(agent: string | null, colorScheme: ColorScheme): string | null {
-  if (agent === null || !ICONED_AGENTS.includes(agent)) return null
-  return themedIcon(`agent-icons/${agent}.png`, colorScheme)
+  const id = canonicalAgentId(agent)
+  if (id === null || !ICONED_AGENTS.includes(id)) return null
+  return themedIcon(`agent-icons/${id}.png`, colorScheme)
+}
+
+/** Identifiants d'agent que rapporte Orca et qui désignent un harnais livré sous un autre nom (`dsh-tui` pour `dsh`). */
+const AGENT_ALIASES: Readonly<Record<string, string>> = { 'dsh-tui': 'dsh' }
+
+/** Identifiant canonique d'un agent : l'alias connu est ramené à son nom, tout autre identifiant reste inchangé. */
+export function canonicalAgentId(agent: string | null): string | null {
+  if (agent === null) return null
+  return AGENT_ALIASES[agent] ?? agent
 }

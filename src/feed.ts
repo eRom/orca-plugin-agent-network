@@ -1,5 +1,6 @@
 // Construit le fil des derniers messages entre les agents du workspace, à partir des sorties JSON du CLI `orca`.
 import { OrcaCliError, type OrcaRunner } from './orca-cli'
+import { canonicalAgentId } from './icons'
 
 /** Un élément de `result.terminals` d'`orca terminal list --json`. */
 export type CliTerminal = { handle: string; title?: string; agentIdentity?: string }
@@ -50,7 +51,7 @@ function previewOf(body: string): string {
 function partyOf(handle: string, known: Map<string, CliTerminal>, labels: FeedLabels): Party {
   const terminal = known.get(handle)
   if (!terminal) return { handle, label: labels.closedTerminal, agent: null, live: false }
-  const agent = terminal.agentIdentity ? terminal.agentIdentity : null
+  const agent = canonicalAgentId(terminal.agentIdentity ? terminal.agentIdentity : null)
   const kind = agent ?? labels.shell
   return { handle, label: terminal.title ? `${kind} · ${terminal.title}` : kind, agent, live: true }
 }

@@ -243,3 +243,9 @@ test('runner returns the result field and surfaces the CLI error code', async ()
     (error) => error instanceof OrcaCliError && error.code === 'runtime_unavailable' && /not running/.test(error.message)
   )
 })
+
+test('labels a dsh-tui terminal with the canonical agent id', () => {
+  const feed = buildFeed([{ handle: 'term_d', title: 'Plan', agentIdentity: 'dsh-tui' }], [message({ sequence: 1, from_handle: 'term_d', to_handle: 'term_d' })])
+  assert.equal(feed[0].from?.agent, 'dsh')
+  assert.equal(feed[0].from?.label, 'dsh · Plan')
+})

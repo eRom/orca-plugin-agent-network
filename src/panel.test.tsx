@@ -685,3 +685,18 @@ test('every agent row and every target row use the same icon slot width, so labe
   assert.equal(typeof slots[0]?.props.width, 'number')
   await expectClean(view)
 })
+
+test('an agent reported as dsh-tui gets the dsh icon and the DeepSeek Harness name', async () => {
+  const agents: AgentsView = {
+    workspace: { name: 'Workspace' },
+    agents: [{ handle: 'term_dsh', agent: 'dsh-tui', title: null, state: 'waiting', since: 1000 }]
+  }
+  const { view } = await open({ agents: () => agents })
+  assert.ok(view.findAll({ type: 'Image' }).some((image) => image.props.src === 'agent-icons/dsh.png'))
+  assert.notEqual(view.find({ type: 'Text', text: 'DeepSeek Harness' }), null)
+})
+
+test('the remove button is a secondary outline button', async () => {
+  const { view } = await open({ status: () => ({ targets: ALL_INSTALLED }) })
+  assert.equal(view.find({ type: 'Button', text: EN.uninstall })?.props.variant, 'outline')
+})

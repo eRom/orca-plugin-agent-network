@@ -2,6 +2,7 @@
 // Module pur (sans 'orca') : le worker, le panneau et les tests l'importent tous.
 import type { InstallOutcome, TargetState, UninstallOutcome } from './installer'
 import type { AgentState } from './protocol'
+import { canonicalAgentId } from './icons'
 
 export type Locale = 'en' | 'fr'
 
@@ -23,10 +24,13 @@ const HARNESS_NAMES: Record<string, string> = {
 }
 
 /** Nom affichable d'un harnais ; un identifiant inconnu s'affiche tel quel. */
-export const harnessName = (id: string): string => HARNESS_NAMES[id] ?? id
+export const harnessName = (id: string): string => {
+  const canonical = canonicalAgentId(id) ?? id
+  return HARNESS_NAMES[canonical] ?? canonical
+}
 
 /** Nom court d'un harnais, pour les lignes étroites du panneau : « DSH » pour DeepSeek Harness. */
-export const harnessShortName = (id: string): string => (id === 'dsh' ? 'DSH' : harnessName(id))
+export const harnessShortName = (id: string): string => (canonicalAgentId(id) === 'dsh' ? 'DSH' : harnessName(id))
 
 export type Messages = {
   // Fil des messages : libellés des parties absentes de la liste des terminaux du workspace.
