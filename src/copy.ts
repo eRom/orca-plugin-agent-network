@@ -81,15 +81,16 @@ const fr: Messages = {
   installFailed: (detail) => `Installation impossible : ${detail}`,
   uninstallFailed: (detail) => `Retrait impossible : ${detail}`,
   installResult: ({ done, skipped, failed, absent }) => {
-    const parts = [done > 0 ? `Installé pour ${done} harnais` : 'Rien installé']
+    const folders = (count: number) => (count === 1 ? '1 dossier de skills' : `${count} dossiers de skills`)
+    const parts = [done > 0 ? `Installé dans ${folders(done)}` : 'Rien installé']
     if (skipped > 0) parts.push(`${skipped} ignoré${skipped > 1 ? 's' : ''}`)
     if (failed > 0) parts.push(`${failed} en échec`)
-    const absentNote = absent > 0 ? ` ${absent} harnais absent${absent > 1 ? 's' : ''}.` : ''
+    const absentNote = absent > 0 ? ` ${folders(absent)} sans harnais.` : ''
     return `${parts.join(', ')}.${absentNote}`
   },
   uninstallResult: ({ removed, kept, failed }) => {
     if (removed === 0 && kept === 0 && failed === 0) return 'Rien à retirer.'
-    const parts = [removed > 0 ? `Retiré de ${removed} harnais` : 'Rien retiré']
+    const parts = [removed > 0 ? `Retiré de ${removed === 1 ? '1 dossier de skills' : `${removed} dossiers de skills`}` : 'Rien retiré']
     if (kept > 0) parts.push(`${kept} conservé${kept > 1 ? 's' : ''} (modifié${kept > 1 ? 's' : ''})`)
     if (failed > 0) parts.push(`${failed} en échec`)
     return `${parts.join(', ')}.`
@@ -152,16 +153,16 @@ const en: Messages = {
   installFailed: (detail) => `Couldn't install: ${detail}`,
   uninstallFailed: (detail) => `Couldn't remove: ${detail}`,
   installResult: ({ done, skipped, failed, absent }) => {
-    const harnesses = (count: number) => (count === 1 ? '1 harness' : `${count} harnesses`)
-    const parts = [done > 0 ? `Installed for ${harnesses(done)}` : 'Nothing installed']
+    const folders = (count: number) => (count === 1 ? '1 skills folder' : `${count} skills folders`)
+    const parts = [done > 0 ? `Installed in ${folders(done)}` : 'Nothing installed']
     if (skipped > 0) parts.push(`${skipped} skipped`)
     if (failed > 0) parts.push(`${failed} failed`)
-    const absentNote = absent > 0 ? ` ${harnesses(absent)} not found.` : ''
+    const absentNote = absent > 0 ? ` ${folders(absent)} not found (harness absent).` : ''
     return `${parts.join(', ')}.${absentNote}`
   },
   uninstallResult: ({ removed, kept, failed }) => {
     if (removed === 0 && kept === 0 && failed === 0) return 'Nothing to remove.'
-    const parts = [removed > 0 ? `Removed from ${removed === 1 ? '1 harness' : `${removed} harnesses`}` : 'Nothing removed']
+    const parts = [removed > 0 ? `Removed from ${removed === 1 ? '1 skills folder' : `${removed} skills folders`}` : 'Nothing removed']
     if (kept > 0) parts.push(`${kept} kept (modified)`)
     if (failed > 0) parts.push(`${failed} failed`)
     return `${parts.join(', ')}.`

@@ -2,12 +2,12 @@
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, assert, mockHost, mountWorker, test } from 'orca/testing'
+import { afterEach, assert, hostError, mockHost, mountWorker, test } from 'orca/testing'
 import { MESSAGES } from './copy'
 import { nodeFileSystem, type FileSystem } from './installer'
 import { OrcaCliError, type OrcaRunner } from './orca-cli'
 import { skillFile, skillTargets } from './targets'
-import { activateWith, LEDGER_KEY, type WorkerDeps } from './worker'
+import { activateWith, LEDGER_BACKUP_KEY, LEDGER_KEY, LOCALE_KEY, type WorkerDeps } from './worker'
 
 const SKILL = '---\nname: agent-network\n---\nTest skill\n'
 
@@ -177,7 +177,7 @@ test('install and uninstall commands post skill.changed', async () => {
   const worker = await mount(hostWith(), deps)
 
   const installed = await worker.command('agentNetwork.installSkill')
-  assert.equal(installed, 'Installed for 4 harnesses.')
+  assert.equal(installed, 'Installed in 4 skills folders.')
   const afterInstall = worker.posts.filter((post) => post.event === 'skill.changed')
   assert.equal(afterInstall.length, 1)
   const installedTargets = (afterInstall[0]?.payload as { targets: { state: string }[] }).targets
@@ -185,7 +185,7 @@ test('install and uninstall commands post skill.changed', async () => {
   for (const target of skillTargets(deps.home)) assert.equal(await readFile(skillFile(target), 'utf8'), SKILL)
 
   const removed = await worker.command('agentNetwork.uninstallSkill')
-  assert.equal(removed, 'Removed from 4 harnesses.')
+  assert.equal(removed, 'Removed from 4 skills folders.')
   const afterRemoval = worker.posts.filter((post) => post.event === 'skill.changed')
   assert.equal(afterRemoval.length, 2)
   const removedTargets = (afterRemoval[1]?.payload as { targets: { state: string }[] }).targets
@@ -207,16 +207,16 @@ test('skill.install and skill.uninstall requests return the report and post skil
   await worker.deactivate()
 })
 
-test('palette results count skipped, failed and absent harnesses, in French too', async () => {
+test('palette results count skipped, failed and absent skills folders, in French too', async () => {
   // Seul Claude est présent ; son fichier est modifié à la main, donc ignoré à la mise à jour.
   const deps = await makeDeps({}, ['.claude'])
   const worker = await mount(hostWith(), deps)
-  assert.equal(await worker.command('agentNetwork.installSkill'), 'Installed for 1 harness. 3 harnesses not found.')
+  assert.equal(await worker.command('agentNetwork.installSkill'), 'Installed in 1 skills folder. 3 skills folders not found (harness absent).')
 
   const claudeFile = skillFile(skillTargets(deps.home)[0]!)
   await nodeFileSystem().writeText(claudeFile, 'edited by the user')
   await worker.request('locale.set', { locale: 'fr-FR' })
-  assert.equal(await worker.command('agentNetwork.installSkill'), 'Rien installé, 1 ignoré. 3 harnais absents.')
+  assert.equal(await worker.command('agentNetwork.installSkill'), 'Rien installé, 1 ignoré. 3 dossiers de skills sans harnais.')
   assert.equal(await worker.command('agentNetwork.uninstallSkill'), 'Rien retiré, 1 conservé (modifié).')
   await worker.deactivate()
 })
@@ -307,3 +307,102 @@ test('never asks for a capability outside the manifest', async () => {
   await worker.deactivate()
 })
 
+
+test('network.feed answers with a localized error when readContext fails', async () => {
+  const host = hostWith({
+    'workspace.readContext': () => {
+      throw hostError('unavailable', 'host busy')
+    }
+  })
+  const worker = await mount(host, await makeDeps())
+  assert.deepEqual(await worker.request('network.feed'), { error: MESSAGES.en.feedFailed })
+  await worker.request('locale.set', { locale: 'fr' })
+  assert.deepEqual(await worker.request('network.feed'), { error: MESSAGES.fr.feedFailed })
+  await worker.deactivate()
+})
+
+test('network.agents answers with the empty view when a host call fails', async () => {
+  const failingList = hostWith({
+    'agents.list': () => {
+      throw hostError('unavailable', 'host busy')
+    }
+  })
+  const first = await mount(failingList, await makeDeps())
+  assert.deepEqual(await first.request('network.agents'), { workspace: null, agents: [] })
+  assert.ok(first.logs.some((line) => line.startsWith('agents failed')), first.logs.join('|'))
+  await first.deactivate()
+
+  const failingContext = hostWith({
+    'workspace.readContext': () => {
+      throw hostError('unavailable', 'host busy')
+    },
+    'agents.list': { agents: [] }
+  })
+  const second = await mount(failingContext, await makeDeps())
+  assert.deepEqual(await second.request('network.agents'), { workspace: null, agents: [] })
+  await second.deactivate()
+})
+
+test('palette counts say skills folders, singular and plural, in both languages', () => {
+  const none = { done: 0, skipped: 0, failed: 0, absent: 0 }
+  assert.equal(MESSAGES.en.installResult({ ...none, done: 1, absent: 1 }), 'Installed in 1 skills folder. 1 skills folder not found (harness absent).')
+  assert.equal(MESSAGES.en.installResult({ ...none, done: 2, failed: 1 }), 'Installed in 2 skills folders, 1 failed.')
+  assert.equal(MESSAGES.fr.installResult({ ...none, done: 1, absent: 1 }), 'Installé dans 1 dossier de skills. 1 dossier de skills sans harnais.')
+  assert.equal(MESSAGES.fr.installResult({ ...none, done: 2, skipped: 2 }), 'Installé dans 2 dossiers de skills, 2 ignorés.')
+  assert.equal(MESSAGES.en.uninstallResult({ removed: 1, kept: 0, failed: 0 }), 'Removed from 1 skills folder.')
+  assert.equal(MESSAGES.fr.uninstallResult({ removed: 3, kept: 0, failed: 0 }), 'Retiré de 3 dossiers de skills.')
+})
+
+test('a corrupt ledger is backed up once, files stay foreign and uninstall deletes nothing', async () => {
+  const deps = await makeDeps()
+  // Une installation précédente, dont le registre est ensuite perdu : les fichiers sont sur disque.
+  const previous = await mount(hostWith(), deps)
+  await previous.request('skill.install')
+  await previous.deactivate()
+
+  const corrupt = { version: 99, entries: [{ anything: true }] }
+  const host = mockHost({ storage: { [LEDGER_KEY]: corrupt as never }, results: { 'workspace.readContext': CONTEXT } })
+  const worker = await mount(host, deps)
+  for (let call = 0; call < 2; call++) {
+    const status = await worker.request('skill.status')
+    assert.deepEqual(status.targets.map((target) => target.state), ['foreign', 'foreign', 'foreign', 'foreign'])
+  }
+  assert.deepEqual(host.data().storage[LEDGER_BACKUP_KEY], corrupt)
+  assert.equal(worker.logs.filter((line) => line.startsWith('ledger invalid')).length, 1, worker.logs.join('|'))
+
+  const removal = await worker.request('skill.uninstall')
+  assert.deepEqual(removal.results, [])
+  for (const target of skillTargets(deps.home)) assert.equal(await readFile(skillFile(target), 'utf8'), SKILL)
+  assert.deepEqual(host.data().storage[LEDGER_BACKUP_KEY], corrupt)
+  await worker.deactivate()
+})
+
+test('an existing ledger backup is never overwritten', async () => {
+  const host = mockHost({
+    storage: { [LEDGER_KEY]: 'second garbage' as never, [LEDGER_BACKUP_KEY]: 'first garbage' as never },
+    results: { 'workspace.readContext': CONTEXT }
+  })
+  const worker = await mount(host, await makeDeps())
+  await worker.request('skill.status')
+  assert.equal(host.data().storage[LEDGER_BACKUP_KEY], 'first garbage')
+  await worker.deactivate()
+})
+
+test('locale.set writes the storage only when the language changes', async () => {
+  const host = hostWith()
+  const worker = await mount(host, await makeDeps())
+  const localeWrites = () => host.callsOf('storage.set').filter((params) => (params as { key: string }).key === LOCALE_KEY).length
+  await worker.request('locale.set', { locale: 'fr-FR' })
+  await worker.request('locale.set', { locale: 'fr-FR' })
+  await worker.request('locale.set', { locale: 'fr' })
+  assert.equal(localeWrites(), 1)
+  await worker.request('locale.set', { locale: 'en-US' })
+  assert.equal(localeWrites(), 2)
+  await worker.deactivate()
+
+  // Une langue déjà stockée n'est pas réécrite par un nouveau worker.
+  const second = await mount(host, await makeDeps())
+  await second.request('locale.set', { locale: 'en-GB' })
+  assert.equal(localeWrites(), 2)
+  await second.deactivate()
+})

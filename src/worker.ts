@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import type { OrcaWorkerApi } from 'orca/worker'
+import type { JsonValue, OrcaWorkerApi } from 'orca/worker'
 import { localeOf, LOCALES, MESSAGES, type InstallCounts, type Locale, type Messages, type UninstallCounts } from './copy'
 import { fetchFeed } from './feed'
 import {
@@ -26,6 +26,8 @@ import { skillTargets } from './targets'
 export const LEDGER_KEY = 'skill.ledger'
 /** Clé de stockage de la dernière langue annoncée par un panneau. */
 export const LOCALE_KEY = 'locale'
+/** Copie du registre quand il est illisible : fixe, jamais écrasée. */
+export const LEDGER_BACKUP_KEY = 'skill.ledger.corrupt'
 
 /** Tout ce que le worker tient du système : les tests y branchent un HOME factice et un faux CLI. */
 export type WorkerDeps = {
@@ -105,6 +107,10 @@ export async function activateWith(orca: OrcaWorkerApi, deps: WorkerDeps): Promi
   let locale: Locale = 'en'
   /** Un panneau a annoncé sa langue : une lecture plus lente du stockage ne doit pas l'écraser. */
   let announced = false
+  /** Langue présente dans le stockage, pour n'écrire que lorsqu'elle change. */
+  let storedLocale: Locale | null = null
+  /** La sauvegarde du registre illisible se fait une seule fois par activation, avec son message. */
+  let corruptLedgerHandled = false
   const m = (): Messages => MESSAGES[locale]
 
   if (deps.orcaBinary) orca.log(`orca binary: ${deps.orcaBinary}`)
@@ -114,6 +120,7 @@ export async function activateWith(orca: OrcaWorkerApi, deps: WorkerDeps): Promi
     try {
       const raw = await orca.storage.get(LOCALE_KEY)
       const known = LOCALES.find((candidate) => candidate === raw)
+      if (known) storedLocale = known
       if (known && !announced) locale = known
     } catch (error) {
       orca.log(`locale read failed: ${messageOf(error)}`)
@@ -121,13 +128,28 @@ export async function activateWith(orca: OrcaWorkerApi, deps: WorkerDeps): Promi
   }
   const ready = loadLocale()
 
+  /**
+   * Registre illisible ou de version inconnue : il se charge comme vide, mais la prochaine sauvegarde l'écraserait.
+   * On en garde donc une copie sous une clé fixe, sans jamais écraser une copie existante.
+   */
+  async function backUpCorruptLedger(raw: JsonValue): Promise<void> {
+    if (corruptLedgerHandled) return
+    corruptLedgerHandled = true
+    try {
+      if ((await orca.storage.get(LEDGER_BACKUP_KEY)) === null) await orca.storage.set(LEDGER_BACKUP_KEY, raw)
+      orca.log(`ledger invalid, loaded as empty (raw value kept under ${LEDGER_BACKUP_KEY})`)
+    } catch (error) {
+      orca.log(`ledger invalid, loaded as empty, backup failed: ${messageOf(error)}`)
+    }
+  }
+
   const ledgerStore: LedgerStore = {
     async load() {
       const raw = await orca.storage.get(LEDGER_KEY)
       if (raw === null) return { version: 1, entries: [] }
       const parsed = parseLedger(raw)
       if (parsed) return parsed
-      orca.log('ledger invalid, loaded as empty')
+      await backUpCorruptLedger(raw)
       return { version: 1, entries: [] }
     },
     async save(ledger) {
@@ -183,7 +205,10 @@ export async function activateWith(orca: OrcaWorkerApi, deps: WorkerDeps): Promi
     locale = localeOf(tag)
     await ready
     try {
-      await orca.storage.set(LOCALE_KEY, locale)
+      if (storedLocale !== locale) {
+        await orca.storage.set(LOCALE_KEY, locale)
+        storedLocale = locale
+      }
     } catch (error) {
       orca.log(`locale write failed: ${messageOf(error)}`)
     }
@@ -191,24 +216,30 @@ export async function activateWith(orca: OrcaWorkerApi, deps: WorkerDeps): Promi
   })
 
   orca.panels.handle('network.agents', async (): Promise<AgentsView> => {
-    const context = await orca.host.call('workspace.readContext', {})
-    if (!context) return { workspace: null, agents: [] }
-    const { agents } = await orca.host.call('agents.list', {})
-    return {
-      workspace: { name: context.displayName },
-      // Un agent sans terminal ne peut pas recevoir de message : il n'a pas d'adresse à afficher.
-      agents: agents.flatMap((agent) =>
-        agent.terminalId === null
-          ? []
-          : [{ handle: agent.terminalId, agent: agent.agent, title: agent.title, state: agent.state, since: agent.stateStartedAt }]
-      )
+    try {
+      const context = await orca.host.call('workspace.readContext', {})
+      if (!context) return { workspace: null, agents: [] }
+      const { agents } = await orca.host.call('agents.list', {})
+      return {
+        workspace: { name: context.displayName },
+        // Un agent sans terminal ne peut pas recevoir de message : il n'a pas d'adresse à afficher.
+        agents: agents.flatMap((agent) =>
+          agent.terminalId === null
+            ? []
+            : [{ handle: agent.terminalId, agent: agent.agent, title: agent.title, state: agent.state, since: agent.stateStartedAt }]
+        )
+      }
+    } catch (error) {
+      // Une erreur de l'hôte ne doit pas faire rejeter la requête : le panneau montre l'état vide.
+      orca.log(`agents failed: ${messageOf(error)}`)
+      return { workspace: null, agents: [] }
     }
   })
 
   orca.panels.handle('network.feed', async (): Promise<FeedResult> => {
-    const context = await orca.host.call('workspace.readContext', {})
-    if (!context?.workspaceId) return { items: [] }
     try {
+      const context = await orca.host.call('workspace.readContext', {})
+      if (!context?.workspaceId) return { items: [] }
       const labels = { closedTerminal: m().closedTerminal, shell: m().shell }
       return { items: await fetchFeed(deps.runOrca, context.workspaceId, labels) }
     } catch (error) {
