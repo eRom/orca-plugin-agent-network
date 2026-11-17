@@ -15,7 +15,7 @@
   "screenshots": [
     {
       "path": "media/screenshot-dark.png",
-      "alt": "The dark Network panel: five agents with Working, Waiting and Done states above the feed of messages they exchanged.",
+      "alt": "The dark Network panel: five agents, two Working and three Done, above the feed of messages they exchanged.",
       "caption": "Every agent, one network",
       "theme": "dark"
     },
@@ -27,7 +27,7 @@
     },
     {
       "path": "media/screenshot-install.png",
-      "alt": "The Instructions section showing the teammate skill installed for Claude Code, Codex and DSH, Grok and Antigravity.",
+      "alt": "The Instructions group, unfolded, showing the teammate skill installed for Claude Code, Codex and DSH, Grok and Antigravity.",
       "caption": "One click teaches every harness"
     }
   ],
