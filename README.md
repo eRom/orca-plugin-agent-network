@@ -1,6 +1,6 @@
 # Agent Network
 
-**Let the coding agents of an Orca workspace talk to each other: "ask codex to review this" works from Claude Code, Codex, Grok, Antigravity, DeepSeek Harness and other harnesses.**
+**Let the coding agents of an Orca workspace talk to each other: "ask codex to review this" works from Claude Code, Codex, Grok, Antigravity, DeepSeek Harness, OpenCode, Pi and other harnesses.**
 
 ![Orca](https://img.shields.io/badge/Orca-%E2%89%A51.4.248-blue) ![macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
@@ -49,7 +49,7 @@ Installing writes one real copy of `SKILL.md` into each harness that is present 
 | Folder | Harnesses |
 | --- | --- |
 | `~/.claude/skills/agent-network` | Claude Code |
-| `~/.agents/skills/agent-network` | Codex, DeepSeek Harness and other harnesses reading the shared folder |
+| `~/.agents/skills/agent-network` | Codex, DeepSeek Harness, OpenCode, Pi and other harnesses reading the shared folder |
 | `~/.grok/skills/agent-network` | Grok |
 | `~/.gemini/config/skills/agent-network` | Antigravity |
 
