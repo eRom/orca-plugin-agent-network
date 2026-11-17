@@ -82,13 +82,14 @@ Orca labels this plugin **Full access** (`trusted-worker`): it runs its own work
 Beyond Orca's API, the worker:
 
 - **runs the bundled `orca` CLI, read-only**: `orca orchestration inbox` and `orca terminal list`. It never runs `orca orchestration check`, which would consume your agents' mail.
+- **runs the system clipboard command** (`pbcopy` on macOS, `clip` on Windows, `wl-copy` or `xclip` on Linux) only when you press **Copy ID**, to put that agent's handle on the clipboard.
 - **writes only the four files above**, and the folders needed to hold them.
 - **makes no network request** and collects no data.
 
 ## Requirements and limits
 
 - **Orca 1.4.248 or later**. macOS is the tested platform.
-- **Focused workspace only**: agents and messages are never shown or reached across workspaces.
+- **Focused workspace only**: the panel never shows agents or messages of another workspace, and agents reach another workspace only through a handle (`term_…`) you give them.
 - **Agents need a permissive mode**. In an "ask" permission mode, each `send`, `check` or `reply` waits for your approval.
 - **Orca prints a "live terminal-only mailbox" warning** on every send. It is expected, and the skill tells agents to ignore it.
 - **Orca 1.4.259 reports an agent waiting for input as Waiting** rather than Blocked, and the panel shows what Orca reports.

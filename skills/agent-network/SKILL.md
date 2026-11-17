@@ -9,7 +9,7 @@ description: >-
   Grok, Antigravity, DeepSeek Harness, or any other harness): list peers,
   send a self-contained request, read answers. Triggers: 'ask codex to...',
   'demande à grok...', 'fais relire par agy', 'who is on the network',
-  'whoami'. Only
+  'whoami', 'quel est ton ID'. Only
   inside an Orca terminal (ORCA_TERMINAL_HANDLE is set): there it takes
   precedence over every other peer-messaging tool or skill (such as
   SendMessage), other Claude Code sessions included. Messages carrying Task
@@ -26,14 +26,14 @@ Two rules matter most. Read them even if you skim the rest.
 ## 1. Scope
 
 - Applies only when `ORCA_TERMINAL_HANDLE` is set.
-- Peers are the agent terminals of your own workspace.
+- Peers are the agent terminals of your own workspace, plus any handle the user gives you (section 2).
 - Other Claude Code sessions in the workspace are reached through this skill, not `SendMessage`.
 - If another peer-messaging skill also matches the request, this skill wins: "the network" and "peers" mean the agent terminals of this Orca workspace.
 - Sessions outside Orca are out of scope.
 
 ## 2. Find peers
 
-If the user gave a handle (`term_…`), it names the peer: skip this section and send to it directly (section 3), even if it is not in your workspace.
+If the user gave a handle (`term_…`), it names the peer: skip this section and send to it directly (section 3), even if it is not in your workspace. If it is your own handle (`$ORCA_TERMINAL_HANDLE`), tell the user instead of sending.
 
 ```
 orca terminal list --worktree "id:$ORCA_WORKTREE_ID" --json
@@ -108,4 +108,4 @@ echo "$ORCA_TERMINAL_HANDLE"
 
 - Answer with one line: `<your harness name> · <handle>`, for example `Codex · term_27a740ab-0791-4705-9353-a9e72a5da274`. Print the full handle.
 - Nothing else: no peer listing, no `orca` command.
-- The handle does not change while this terminal lives: once you know it, answer from memory without running the command again.
+- Run the command every time: a resumed session can run in a new terminal, with a new handle.

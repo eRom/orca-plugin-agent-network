@@ -38,7 +38,7 @@ const emptyFeedRunner: OrcaRunner = async (args) => (args[0] === 'terminal' ? { 
 
 async function makeDeps(overrides: Partial<WorkerDeps> = {}, dirs: string[] = ALL_HARNESSES): Promise<WorkerDeps & { home: string }> {
   const home = await makeHome(...dirs)
-  // Par défaut, le presse-papiers est un enregistreur : un test ne touche jamais celui du système.
+  // Par défaut, le presse-papiers est un no-op : un test ne touche jamais celui du système (un test qui observe l'écriture injecte le sien).
   const writeClipboard = async (): Promise<void> => {}
   return { home, readSkill: async () => SKILL, fs: nodeFileSystem(), runOrca: emptyFeedRunner, writeClipboard, ...overrides }
 }
@@ -206,6 +206,52 @@ test('network.copyHandle reports any other failure without rejecting', async () 
   assert.deepEqual(await worker.request('network.copyHandle', { handle: 'term_codex' }), {
     error: MESSAGES.en.copyFailed('pbcopy exited with code 1: boom')
   })
+  await worker.deactivate()
+})
+
+test('network.copyHandle serializes overlapping copies', async () => {
+  const events: string[] = []
+  let releaseFirst: () => void = () => {}
+  const firstGate = new Promise<void>((resolve) => {
+    releaseFirst = resolve
+  })
+  let firstStarted: () => void = () => {}
+  const firstStart = new Promise<void>((resolve) => {
+    firstStarted = resolve
+  })
+  let calls = 0
+  const writeClipboard = async (text: string): Promise<void> => {
+    events.push(`start:${text}`)
+    if (++calls === 1) {
+      firstStarted()
+      await firstGate
+    }
+    events.push(`end:${text}`)
+  }
+  const worker = await mount(hostWith(), await makeDeps({ writeClipboard }))
+  const first = worker.request('network.copyHandle', { handle: 'term_a' })
+  const second = worker.request('network.copyHandle', { handle: 'term_b' })
+  await firstStart
+  // Laisse au second le temps de démarrer s'il n'était pas mis en file.
+  for (let i = 0; i < 5; i++) await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  releaseFirst()
+  assert.deepEqual(await Promise.all([first, second]), [{ ok: true }, { ok: true }])
+  assert.deepEqual(events, ['start:term_a', 'end:term_a', 'start:term_b', 'end:term_b'])
+  await worker.deactivate()
+})
+
+test('network.copyHandle keeps copying after a failed write', async () => {
+  const written: string[] = []
+  const writeClipboard = async (text: string): Promise<void> => {
+    written.push(text)
+    if (text === 'term_a') throw new Error('boom')
+  }
+  const worker = await mount(hostWith(), await makeDeps({ writeClipboard }))
+  const first = worker.request('network.copyHandle', { handle: 'term_a' })
+  const second = worker.request('network.copyHandle', { handle: 'term_b' })
+  assert.deepEqual(await first, { error: MESSAGES.en.copyFailed('boom') })
+  assert.deepEqual(await second, { ok: true })
+  assert.deepEqual(written, ['term_a', 'term_b'])
   await worker.deactivate()
 })
 

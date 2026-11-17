@@ -255,9 +255,18 @@ export async function activateWith(orca: OrcaWorkerApi, deps: WorkerDeps): Promi
     }
   })
 
+  /**
+   * Chaîne des écritures du presse-papiers : une copie ne démarre qu'après le règlement de la précédente (succès ou échec).
+   * Le panneau coche la dernière ligne pressée, le presse-papiers doit donc finir avec le dernier identifiant.
+   */
+  let clipboardQueue: Promise<unknown> = Promise.resolve()
+
   orca.panels.handle('network.copyHandle', async ({ handle }): Promise<CopyResult> => {
     try {
-      await deps.writeClipboard(handle)
+      const write = clipboardQueue.then(() => deps.writeClipboard(handle))
+      // Un échec ne doit pas bloquer la copie suivante : la chaîne avale le rejet, la requête le garde.
+      clipboardQueue = write.catch(() => undefined)
+      await write
       return { ok: true }
     } catch (error) {
       orca.log(`copy failed: ${messageOf(error)}`)

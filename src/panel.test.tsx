@@ -711,8 +711,24 @@ test('the remove button is a secondary outline button', async () => {
 
 const copyButton = (view: View, name: string) => view.find({ label: EN.copyHandle(name) })
 
+type TreeNode = NonNullable<ReturnType<View['tree']>>
+
+/** Les nœuds de l'arbre dessiné dont la clé commence par `prefix`, en profondeur. */
+const nodesKeyed = (node: TreeNode | null, prefix: string): Exclude<TreeNode, string>[] => {
+  if (node === null || typeof node === 'string') return []
+  const own = node.key?.startsWith(prefix) ? [node] : []
+  return own.concat((node.children ?? []).flatMap((child) => nodesKeyed(child, prefix)))
+}
+
 test('each agent row ends with a ghost copy button named after the agent', async () => {
   const { view } = await open()
+  // Le bouton de copie est la dernière boîte de chaque ligne, après le badge d'état.
+  const rows = nodesKeyed(view.tree(), 'agent-')
+  assert.equal(rows.length, 5)
+  for (const row of rows) {
+    const lastTwo = (row.children ?? []).slice(-2).map((child) => (typeof child === 'string' ? child : child.key))
+    assert.deepEqual(lastTwo, [`state-${row.key?.slice('agent-'.length)}`, `copy-${row.key?.slice('agent-'.length)}`])
+  }
   const reviewer = copyButton(view, 'Reviewer')
   assert.equal(reviewer?.props.icon, 'copy')
   assert.equal(reviewer?.props.variant, 'ghost')

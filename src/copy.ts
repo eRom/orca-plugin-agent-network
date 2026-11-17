@@ -186,7 +186,7 @@ const fr: Messages = {
   retry: 'Réessayer',
   feedUnavailableTitle: 'Messages indisponibles',
   refresh: 'Actualiser',
-  copyHandle: (name) => `Copier l'ID de ${name}`,
+  copyHandle: (name) => `Copier l'ID de l'agent ${name}`,
   copyHandleTooltip: (handle) => `Copier l'ID (${handle})`,
   copied: 'Copié',
   unknownTime: 'heure inconnue',
