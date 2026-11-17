@@ -610,10 +610,14 @@ export function instructionsSummary(m: Messages, status: StatusResult | null): s
   return installed === 0 ? m.instructionsNotInstalled : m.instructionsInstalledCount(installed, counted.length)
 }
 
-/** Le choix de l'utilisateur l'emporte ; à défaut, la section est ouverte tant que rien n'est installé (ni à jour, ni à mettre à jour). */
+/**
+ * Le choix de l'utilisateur l'emporte ; à défaut, la section est ouverte tant que rien n'est installé (ni à jour, ni à mettre à jour).
+ * Repliée pendant la lecture de l'état : le cas courant (tout installé) ne s'ouvre pas pour se refermer aussitôt.
+ */
 function isInstructionsOpen(chosen: boolean | null, status: StatusResult | null): boolean {
   if (chosen !== null) return chosen
-  return !(status?.targets.some((target) => target.state === 'installed' || target.state === 'outdated') ?? false)
+  if (status === null) return false
+  return !status.targets.some((target) => target.state === 'installed' || target.state === 'outdated')
 }
 
 function renderInstructionsSection(m: Messages) {
