@@ -35,6 +35,8 @@ type Setup = {
   visible?: boolean
   /** Choix mémorisé pour la section Consignes ; `true` par défaut, pour que les tests lisent son contenu sans la déplier. `null` : jamais choisi. */
   instructionsOpen?: boolean | null
+  /** Idem pour la section Messages : `true` par défaut, `null` : jamais choisi (repliée). */
+  messagesOpen?: boolean | null
 }
 
 /** Panneaux montés par le test en cours : démontés après lui, même si une assertion a échoué avant `expectClean`. */
@@ -103,13 +105,21 @@ async function open(setup: Setup = {}) {
     theme: setup.theme,
     locale: setup.locale ?? 'en-US',
     visible: setup.visible,
-    persisted: { plugin: { instructionsOpen: setup.instructionsOpen === undefined ? true : setup.instructionsOpen } }
+    persisted: {
+      plugin: {
+        instructionsOpen: setup.instructionsOpen === undefined ? true : setup.instructionsOpen,
+        messagesOpen: setup.messagesOpen === undefined ? true : setup.messagesOpen
+      }
+    }
   })
   mounted.push(view)
   return { view, state, calls, requestOrder, locales }
 }
 
 type View = Awaited<ReturnType<typeof open>>['view']
+
+/** Le groupe repliable portant ce titre : le panneau en dessine deux (Messages et Consignes). */
+const collapsibleTitled = (view: View, title: string) => view.findAll({ type: 'Collapsible' }).find((group) => group.props.title === title) ?? null
 
 /** Un panneau propre : rien de jeté, aucun refus de l'hôte, aucun avertissement de rendu. */
 async function expectClean(view: View): Promise<void> {
@@ -532,9 +542,9 @@ test('renders in French when locale is fr', async () => {
   const { view } = await open({ locale: 'fr-FR', status: () => ({ targets: ONE_TARGET_OF_EACH_STATE }) })
   assert.notEqual(view.find({ text: FR.agentStates.blocked }), null)
   assert.notEqual(view.find({ text: FR.sectionAgents }), null)
-  assert.notEqual(view.find({ text: FR.sectionMessages }), null)
   // Le titre d'un groupe repliable est une propriété du composant, pas un texte dessiné dans son contenu.
-  assert.equal(view.find({ type: 'Collapsible' })?.props.title, FR.sectionInstructions)
+  assert.equal(collapsibleTitled(view, FR.sectionInstructions)?.props.title, FR.sectionInstructions)
+  assert.equal(collapsibleTitled(view, FR.sectionMessages)?.props.title, FR.sectionMessages)
   assert.notEqual(view.find({ text: FR.update }), null)
   assert.notEqual(view.find({ text: FR.labelled(FR.targetStates.foreign, FR.targetStateHints.foreign) }), null)
   assert.notEqual(view.find({ text: FR.unreadBadge }), null)
@@ -1001,7 +1011,14 @@ test('a workspace switch stops the old check timer, which must not reset a newer
 
 // --- Section Consignes repliable ---------------------------------------------------------------------------------
 
-const instructionsGroup = (view: View) => view.find({ type: 'Collapsible' })
+const instructionsGroup = (view: View) => collapsibleTitled(view, EN.sectionInstructions) ?? collapsibleTitled(view, FR.sectionInstructions)
+
+/** Le groupe Consignes, ou une erreur claire : les gestes (`toggle`, `valueOf`) le relisent à chaque appel, il change après un rendu. */
+const requireInstructions = (view: View) => {
+  const group = instructionsGroup(view)
+  assert.ok(group)
+  return group
+}
 
 test('the instructions group starts open when nothing is installed, hint and buttons included', async () => {
   const { view } = await open({ instructionsOpen: null, status: () => ({ targets: NONE_INSTALLED }) })
@@ -1029,8 +1046,8 @@ test('the instructions group starts closed when everything is installed, and the
 
 test('opening the closed group shows the hint, the target rows and the buttons', async () => {
   const { view } = await open({ instructionsOpen: null, status: () => ({ targets: ALL_INSTALLED }) })
-  await view.toggle({ type: 'Collapsible' })
-  assert.equal(view.valueOf({ type: 'Collapsible' }), true)
+  await view.toggle(requireInstructions(view))
+  assert.equal(view.valueOf(requireInstructions(view)), true)
   assert.notEqual(view.find({ text: EN.instructionsHint }), null)
   assert.notEqual(view.find({ type: 'Button', text: EN.uninstall }), null)
   await expectClean(view)
@@ -1039,20 +1056,20 @@ test('opening the closed group shows the hint, the target rows and the buttons',
 test('the user choice is persisted and wins over the default after a remount', async () => {
   const first = await open({ instructionsOpen: null, status: () => ({ targets: ALL_INSTALLED }) })
   assert.equal(first.view.persisted.plugin.instructionsOpen ?? null, null)
-  await first.view.toggle({ type: 'Collapsible' })
+  await first.view.toggle(requireInstructions(first.view))
   assert.equal(first.view.persisted.plugin.instructionsOpen, true)
   const saved = first.view.persisted.plugin.instructionsOpen as boolean
   await first.view.unmount()
 
   // Rouvert avec le choix mémorisé : la section reste dépliée alors que tout est installé.
   const reopened = await open({ instructionsOpen: saved, status: () => ({ targets: ALL_INSTALLED }) })
-  assert.equal(reopened.view.valueOf({ type: 'Collapsible' }), true)
+  assert.equal(reopened.view.valueOf(requireInstructions(reopened.view)), true)
   // Fermée par l'utilisateur sur une installation vide : la section reste repliée.
-  await reopened.view.toggle({ type: 'Collapsible' })
+  await reopened.view.toggle(requireInstructions(reopened.view))
   assert.equal(reopened.view.persisted.plugin.instructionsOpen, false)
   await reopened.view.unmount()
   const closed = await open({ instructionsOpen: false, status: () => ({ targets: NONE_INSTALLED }) })
-  assert.equal(closed.view.valueOf({ type: 'Collapsible' }), false)
+  assert.equal(closed.view.valueOf(requireInstructions(closed.view)), false)
   await expectClean(closed.view)
 })
 
@@ -1130,4 +1147,115 @@ test('the summary is localized', () => {
   assert.equal(summaryOf(['installed', 'installed', 'not-installed'], 'fr'), '2 sur 3 installées')
   assert.equal(summaryOf(['not-installed'], 'fr'), 'Non installées')
   assert.equal(summaryOf(['outdated'], 'fr'), 'Mise à jour disponible')
+})
+
+// --- Section Messages repliable ----------------------------------------------------------------------------------
+
+const messagesGroup = (view: View) => collapsibleTitled(view, EN.sectionMessages) ?? collapsibleTitled(view, FR.sectionMessages)
+
+/** Le groupe Messages, ou une erreur claire : relu à chaque geste, car il change après un rendu. */
+const requireMessages = (view: View) => {
+  const group = messagesGroup(view)
+  assert.ok(group)
+  return group
+}
+
+test('the messages group starts closed when never chosen, with the counts as summary', async () => {
+  const { view } = await open({ messagesOpen: null })
+  const group = requireMessages(view)
+  assert.equal(view.valueOf(group), false)
+  assert.equal(group.props.title, EN.sectionMessages)
+  assert.equal(group.props.description, '4 messages, 1 unread')
+  // Le contenu d'un groupe replié n'est pas dessiné.
+  assert.equal(view.find({ text: UNREAD_MESSAGE.subject }), null)
+  assert.equal(view.find({ text: EN.unreadBadge }), null)
+  await expectClean(view)
+})
+
+test('opening the messages group shows the rows, and the choice is persisted', async () => {
+  const first = await open({ messagesOpen: null })
+  assert.equal(first.view.persisted.plugin.messagesOpen ?? null, null)
+  await first.view.toggle(requireMessages(first.view))
+  assert.equal(first.view.valueOf(requireMessages(first.view)), true)
+  assert.equal(first.view.persisted.plugin.messagesOpen, true)
+  assert.notEqual(first.view.find({ text: UNREAD_MESSAGE.subject }), null)
+  const saved = first.view.persisted.plugin.messagesOpen as boolean
+  await first.view.unmount()
+
+  // Rouvert avec le choix mémorisé : la section reste dépliée.
+  const reopened = await open({ messagesOpen: saved })
+  assert.equal(reopened.view.valueOf(requireMessages(reopened.view)), true)
+  // Refermée par l'utilisateur : le choix est mémorisé, le résumé reste.
+  await reopened.view.toggle(requireMessages(reopened.view))
+  assert.equal(reopened.view.persisted.plugin.messagesOpen, false)
+  assert.equal(requireMessages(reopened.view).props.description, '4 messages, 1 unread')
+  await expectClean(reopened.view)
+})
+
+test('the messages group keeps its summary fresh while closed, as the feed polls', async () => {
+  await withFakeTimers(async () => {
+    const { view, state } = await open({ messagesOpen: null, feed: () => ({ items: [UNREAD_MESSAGE] }) })
+    assert.equal(requireMessages(view).props.description, '1 message, 1 unread')
+    state.feed = () => ({ items: FEED })
+    mock.timers.tick(panel.FEED_POLL_MS)
+    await view.settled()
+    assert.equal(requireMessages(view).props.description, '4 messages, 1 unread')
+    assert.equal(view.valueOf(requireMessages(view)), false)
+    await expectClean(view)
+  })
+})
+
+test('the messages group is titled and summarized in French when locale is fr', async () => {
+  const { view } = await open({ locale: 'fr-FR', messagesOpen: null })
+  const group = requireMessages(view)
+  assert.equal(group.props.title, FR.sectionMessages)
+  assert.equal(group.props.description, '4 messages, 1 non lu')
+  await expectClean(view)
+})
+
+test('the closed messages group says when there is nothing, and stays quiet while loading or on an error', async () => {
+  const empty = await open({ messagesOpen: null, feed: () => ({ items: [] }) })
+  assert.equal(requireMessages(empty.view).props.description, EN.noMessages)
+  await expectClean(empty.view)
+
+  const failing = await open({ messagesOpen: null, feed: () => ({ error: 'boom' }) })
+  assert.equal(requireMessages(failing.view).props.description, undefined)
+  assert.equal(failing.view.valueOf(requireMessages(failing.view)), false)
+  await expectClean(failing.view)
+})
+
+test('the messages error and its retry are inside the group, visible once opened', async () => {
+  const { view } = await open({ messagesOpen: true, feed: () => ({ error: 'boom' }) })
+  assert.notEqual(view.find({ type: 'Callout', text: /boom/ }), null)
+  assert.notEqual(view.find({ type: 'Button', text: EN.retry }), null)
+  await expectClean(view)
+})
+
+// --- Résumé du fil -----------------------------------------------------------------------------------------------
+
+const feedItem = (id: string, read: boolean) => ({ ...UNREAD_MESSAGE, id, read })
+
+test('the messages summary is empty while loading and on an error', () => {
+  assert.equal(panel.messagesSummary(EN, null), null)
+  assert.equal(panel.messagesSummary(EN, { error: 'boom' }), null)
+})
+
+test('the messages summary says there is nothing without any message', () => {
+  assert.equal(panel.messagesSummary(EN, { items: [] }), EN.noMessages)
+  assert.equal(panel.messagesSummary(FR, { items: [] }), FR.noMessages)
+})
+
+test('the messages summary counts messages and unread ones, with singular forms', () => {
+  assert.equal(panel.messagesSummary(EN, { items: [feedItem('a', true)] }), '1 message')
+  assert.equal(panel.messagesSummary(EN, { items: [feedItem('a', true), feedItem('b', true)] }), '2 messages')
+  assert.equal(panel.messagesSummary(EN, { items: [feedItem('a', false)] }), '1 message, 1 unread')
+  assert.equal(panel.messagesSummary(EN, { items: [feedItem('a', false), feedItem('b', false), feedItem('c', true)] }), '3 messages, 2 unread')
+  assert.equal(panel.messagesSummary(EN, { items: [feedItem('a', false), feedItem('b', true)] }), '2 messages, 1 unread')
+})
+
+test('the messages summary is localized', () => {
+  assert.equal(panel.messagesSummary(FR, { items: [feedItem('a', true)] }), '1 message')
+  assert.equal(panel.messagesSummary(FR, { items: [feedItem('a', true), feedItem('b', true)] }), '2 messages')
+  assert.equal(panel.messagesSummary(FR, { items: [feedItem('a', false), feedItem('b', true)] }), '2 messages, 1 non lu')
+  assert.equal(panel.messagesSummary(FR, { items: [feedItem('a', false), feedItem('b', false)] }), '2 messages, 2 non lus')
 })

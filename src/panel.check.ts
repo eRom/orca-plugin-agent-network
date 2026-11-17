@@ -18,6 +18,8 @@ const COPY_OK = { ok: true as const }
 export default defineCheck({
   // Réseau vivant : cinq agents dont un bloqué, le fil complet, aucune consigne posée.
   live: {
+    // La section Messages est repliée tant que l'utilisateur ne l'a pas ouverte : ici elle l'est, pour voir les lignes.
+    persisted: { plugin: { messagesOpen: true } },
     requests: {
       'locale.set': LOCALE_OK,
       'network.copyHandle': COPY_OK,
@@ -59,6 +61,7 @@ export default defineCheck({
   },
   // Le fil échoue : les agents restent, l'erreur s'affiche à la place des messages.
   feedError: {
+    persisted: { plugin: { messagesOpen: true } },
     requests: {
       'locale.set': LOCALE_OK,
       'network.copyHandle': COPY_OK,
@@ -69,6 +72,7 @@ export default defineCheck({
   },
   // Quatre dossiers tiers : aucun bouton, une seule phrase d'explication sous la liste.
   allThirdParty: {
+    persisted: { plugin: { messagesOpen: true } },
     requests: {
       'locale.set': LOCALE_OK,
       'network.copyHandle': COPY_OK,

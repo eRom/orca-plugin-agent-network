@@ -74,6 +74,8 @@ export type Messages = {
   noAgents: string
   unnamedAgent: string
   noMessages: string
+  /** Résumé visible quand la section Messages est repliée : « 3 messages, 1 non lu » ; `unread` à 0 : « 3 messages ». */
+  messagesCount: (total: number, unread: number) => string
   replyBadge: string
   unreadBadge: string
   messageRoute: (from: string, to: string) => string
@@ -176,6 +178,11 @@ const fr: Messages = {
   noAgents: 'Aucun agent dans ce workspace.',
   unnamedAgent: 'Terminal',
   noMessages: 'Aucun message pour le moment.',
+  messagesCount: (total, unread) => {
+    const count = total === 1 ? '1 message' : `${total} messages`
+    if (unread === 0) return count
+    return `${count}, ${unread === 1 ? '1 non lu' : `${unread} non lus`}`
+  },
   replyBadge: 'Réponse',
   unreadBadge: 'Non lu',
   messageRoute: (from, to) => `${from} → ${to}`,
@@ -269,6 +276,10 @@ const en: Messages = {
   noAgents: 'No agents in this workspace.',
   unnamedAgent: 'Terminal',
   noMessages: 'No messages yet.',
+  messagesCount: (total, unread) => {
+    const count = total === 1 ? '1 message' : `${total} messages`
+    return unread === 0 ? count : `${count}, ${unread} unread`
+  },
   replyBadge: 'Reply',
   unreadBadge: 'Unread',
   messageRoute: (from, to) => `${from} → ${to}`,

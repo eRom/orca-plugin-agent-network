@@ -60,6 +60,11 @@ const statusResult = atom<StatusResult | null>(null)
  * Null : la section est ouverte s'il n'y a rien d'installé, repliée sinon (voir `isInstructionsOpen`).
  */
 const instructionsOpen = atom<boolean | null>('instructionsOpen', null, { persist: 'plugin' })
+/**
+ * Choix de l'utilisateur pour la section Messages, conservé d'une ouverture du panneau à l'autre ; null tant qu'il n'a rien choisi.
+ * Null : la section est repliée, les messages sont secondaires ; son résumé dit l'essentiel (voir `messagesSummary`).
+ */
+const messagesOpen = atom<boolean | null>('messagesOpen', null, { persist: 'plugin' })
 /** Vrai pendant une installation ou un retrait : les deux boutons sont alors grisés. */
 const busy = atom(false)
 const feedback = atom<Feedback | null>(null)
@@ -511,12 +516,25 @@ function renderMessagesSection(m: Messages) {
   } else {
     body = renderRuled(result.items.map((item) => ({ key: item.id, node: renderMessage(m, item) })))
   }
+  const summary = messagesSummary(m, result)
   return (
-    <Stack gap="sm">
-      {renderSectionHeader(m.sectionMessages, result !== null && 'items' in result && result.items.length > 0 ? String(result.items.length) : null)}
+    <Collapsible
+      title={m.sectionMessages}
+      description={summary ?? undefined}
+      open={read(messagesOpen) ?? false}
+      onChange={(next) => set(messagesOpen, next)}
+    >
       {body}
-    </Stack>
+    </Collapsible>
   )
+}
+
+/** Résumé d'une ligne du fil, lisible section repliée ; null tant que le fil se charge ou s'il est illisible. */
+export function messagesSummary(m: Messages, result: FeedResult | null): string | null {
+  if (result === null || 'error' in result) return null
+  if (result.items.length === 0) return m.noMessages
+  const unread = result.items.filter((item) => !item.read).length
+  return m.messagesCount(result.items.length, unread)
 }
 
 /** « Claude Code », « Codex · DSH » : assez court pour tenir sur une ligne à 360 px. */
