@@ -819,3 +819,157 @@ test('copy labels are French when locale is fr', async () => {
   assert.equal(view.find({ label: EN.copyHandle('Reviewer') }), null)
   await expectClean(view)
 })
+
+// --- Copie : réponses en retard et minuteurs --------------------------------------------------------------------
+
+/** Une réponse que le test libère quand il veut ; la requête reste en vol jusque-là. */
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
+/**
+ * Compte les minuteurs de la coche encore en attente (ceux de `COPIED_FEEDBACK_MS`) : le noyau de test ne les expose pas.
+ * Se pose par-dessus `setTimeout` du moment, simulé ou réel ; `stop` remet celui qui était là.
+ */
+async function withFeedbackTimerCount(body: (pending: () => number) => Promise<void>): Promise<void> {
+  const host = globalThis as unknown as { setTimeout: (...args: any[]) => unknown; clearTimeout: (timer: unknown) => void }
+  const originalSet = host.setTimeout
+  const originalClear = host.clearTimeout
+  const live = new Set<unknown>()
+  host.setTimeout = (callback: (...args: any[]) => void, delay: number, ...rest: any[]) => {
+    const timer: unknown = originalSet(
+      (...args: any[]) => {
+        live.delete(timer)
+        callback(...args)
+      },
+      delay,
+      ...rest
+    )
+    if (delay === panel.COPIED_FEEDBACK_MS) live.add(timer)
+    return timer
+  }
+  host.clearTimeout = (timer: unknown) => {
+    live.delete(timer)
+    originalClear(timer)
+  }
+  try {
+    await body(() => live.size)
+  } finally {
+    host.setTimeout = originalSet
+    host.clearTimeout = originalClear
+  }
+}
+
+const iconsChecked = (view: View) => view.findAll({ type: 'IconButton' }).filter((button) => button.props.icon === 'check').length
+
+test('a slower earlier copy answer does not override a newer one', async () => {
+  const answers = { term_codex: deferred<CopyResult>(), term_claude: deferred<CopyResult>() }
+  const { view } = await open({ copyHandle: ({ handle }) => answers[handle as keyof typeof answers].promise as unknown as CopyResult })
+  // `press` attend toutes les requêtes en vol : les deux appuis sont lancés sans attente. Reviewer, appuyé en second,
+  // répond d'abord ; Builder répond ensuite, en retard sur une copie plus récente.
+  const presses = [view.press({ label: EN.copyHandle('Builder') }), view.press({ label: EN.copyHandle('Reviewer') })]
+  await new Promise<void>((resolve) => setTimeout(resolve, 20))
+  answers.term_claude.resolve({ ok: true })
+  await new Promise<void>((resolve) => setTimeout(resolve, 20))
+  answers.term_codex.resolve({ ok: true })
+  await Promise.all(presses)
+  assert.equal(copyButton(view, 'Builder')?.props.icon, 'copy', 'the older answer is dropped')
+  assert.equal(copyButton(view, 'Reviewer')?.props.icon, 'check')
+  await expectClean(view)
+})
+
+test('a copy answer that lands after a workspace switch shows nothing', async () => {
+  const late = deferred<CopyResult>()
+  const { view } = await open({ copyHandle: () => late.promise as unknown as CopyResult })
+  await view.emit('workspace.changed', { context: CONTEXT('w1', 'My workspace') })
+  // `press` et `emit` attendent les requêtes en vol : on les lance sans attente, puis on répond une fois le changement vu.
+  const press = view.press({ label: EN.copyHandle('Builder') })
+  await new Promise<void>((resolve) => setTimeout(resolve, 20))
+  const switching = view.emit('workspace.changed', { context: CONTEXT('w2', 'Other workspace') })
+  await new Promise<void>((resolve) => setTimeout(resolve, 20))
+  late.resolve({ error: EN.copyFailed('late') })
+  await Promise.all([press, switching])
+  assert.equal(view.find({ type: 'Text', text: EN.copyFailed('late') }), null)
+  assert.equal(iconsChecked(view), 0)
+  await expectClean(view)
+})
+
+test('a copy answer that lands after the panel closed changes nothing', async () => {
+  await withFeedbackTimerCount(async (pending) => {
+    const late = deferred<CopyResult>()
+    const { view } = await open({ copyHandle: () => late.promise as unknown as CopyResult })
+    const press = view.press({ label: EN.copyHandle('Builder') })
+    await new Promise<void>((resolve) => setTimeout(resolve, 20))
+    // `unmount` attend lui aussi la requête en vol : on le lance, on laisse le panneau se fermer, puis on répond.
+    const closing = view.unmount()
+    await new Promise<void>((resolve) => setTimeout(resolve, 20))
+    late.resolve({ ok: true })
+    await Promise.all([press, closing])
+    assert.deepEqual(view.errors, [])
+    assert.equal(pending(), 0, 'a late answer starts no check timer on a closed panel')
+    // L'état de copie est celui du module : une réponse tardive qui s'y serait posée se verrait sur le panneau suivant.
+    const next = await open()
+    assert.equal(iconsChecked(next.view), 0, 'a late answer left no check behind')
+    await expectClean(next.view)
+  })
+})
+
+test('a panel opened after another one was closed on a check starts without it', async () => {
+  await withFakeTimers(async () => {
+    const first = await open()
+    await first.view.press({ label: EN.copyHandle('Builder') })
+    assert.equal(copyButton(first.view, 'Builder')?.props.icon, 'check')
+    await first.view.unmount()
+    const second = await open()
+    assert.equal(iconsChecked(second.view), 0)
+    await expectClean(second.view)
+  })
+})
+
+test('closing the panel stops the check timer: no callback runs against the closed panel', async () => {
+  await withFakeTimers(async () => {
+    await withFeedbackTimerCount(async (pending) => {
+      const { view } = await open()
+      await view.press({ label: EN.copyHandle('Builder') })
+      assert.equal(copyButton(view, 'Builder')?.props.icon, 'check')
+      assert.equal(pending(), 1, 'the check timer runs while the panel is open')
+      await view.unmount()
+      assert.equal(pending(), 0, 'the check timer is cleared with the panel')
+      mock.timers.tick(panel.COPIED_FEEDBACK_MS)
+      await new Promise<void>((resolve) => resolve())
+      assert.deepEqual(view.errors, [])
+      assert.deepEqual(view.warnings, [])
+    })
+  })
+})
+
+test('a workspace switch stops the old check timer, which must not reset a newer check', async () => {
+  await withFakeTimers(async () => {
+    await withFeedbackTimerCount(async (pending) => {
+      const { view } = await open()
+      await view.emit('workspace.changed', { context: CONTEXT('w1', 'My workspace') })
+      await view.press({ label: EN.copyHandle('Builder') })
+      assert.equal(copyButton(view, 'Builder')?.props.icon, 'check')
+      assert.equal(pending(), 1)
+      mock.timers.tick(1000)
+      await view.settled()
+      await view.emit('workspace.changed', { context: CONTEXT('w2', 'Other workspace') })
+      assert.equal(iconsChecked(view), 0)
+      assert.equal(pending(), 0, 'the switch cleared the old check timer')
+      await view.press({ label: EN.copyHandle('Reviewer') })
+      assert.equal(copyButton(view, 'Reviewer')?.props.icon, 'check')
+      // 1000 + 600 = 1,6 s depuis la première copie : son minuteur aurait tiré, le nouveau court encore.
+      mock.timers.tick(600)
+      await view.settled()
+      assert.equal(copyButton(view, 'Reviewer')?.props.icon, 'check', 'the old timer did not end the new check')
+      mock.timers.tick(panel.COPIED_FEEDBACK_MS - 600)
+      await view.settled()
+      assert.equal(copyButton(view, 'Reviewer')?.props.icon, 'copy')
+      await expectClean(view)
+    })
+  })
+})
