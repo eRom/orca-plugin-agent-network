@@ -45,7 +45,7 @@ declare module 'node:child_process' {
   export type ChildProcess = {
     stdout: { on(event: 'data', listener: (chunk: { toString(): string }) => void): void } | null
     /** Flux d'erreur du processus : `null` si le stdio correspondant n'est pas en `pipe`. */
-    stderr: { on(event: 'data', listener: (chunk: { toString(): string }) => void): void } | null
+    stderr: { on(event: 'data', listener: (chunk: { toString(): string }) => void): void; destroy(): void } | null
     /** Entrée du processus : `null` si le stdio correspondant n'est pas en `pipe`. */
     stdin: {
       write(data: string): boolean
@@ -53,6 +53,7 @@ declare module 'node:child_process' {
       on(event: 'error', listener: (error: Error) => void): void
     } | null
     on(event: 'close', listener: (code: number | null) => void): void
+    on(event: 'exit', listener: (code: number | null) => void): void
     on(event: 'error', listener: (error: Error) => void): void
     kill(signal?: string): boolean
   }

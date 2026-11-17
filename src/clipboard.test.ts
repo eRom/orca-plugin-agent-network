@@ -105,9 +105,19 @@ test('a failing command is reported with its stderr and stops the fallback', asy
   assert.equal(existsSync(marker), false)
 })
 
+test('succeeds when the command exits 0 while a forked server keeps the pipes open', async () => {
+  const dir = await makeDir()
+  // Comme xclip ou wl-copy : le serveur de sélection en arrière-plan hérite de stderr et survit au parent.
+  const forking = await makeScript(dir, 'forking-tool', 'cat > /dev/null\nsleep 3 &\nexit 0')
+  const startedAt = Date.now()
+  await runClipboardCommands([{ file: forking, args: [] }], HANDLE, 1500)
+  assert.ok(Date.now() - startedAt < 1000)
+})
+
 test('a hanging command is killed at the timeout', async () => {
   const dir = await makeDir()
-  const hanging = await makeScript(dir, 'hanging-tool', 'sleep 10')
+  // `exec` : le shell est remplacé par sleep, le SIGKILL l'atteint donc directement.
+  const hanging = await makeScript(dir, 'hanging-tool', 'exec sleep 10')
   const startedAt = Date.now()
   await assert.rejects(
     runClipboardCommands([{ file: hanging, args: [] }], HANDLE, 200),

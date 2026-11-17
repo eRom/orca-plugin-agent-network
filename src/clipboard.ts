@@ -37,6 +37,8 @@ function attempt(command: ClipboardCommand, text: string, timeoutMs: number): Pr
       if (settled) return
       settled = true
       clearTimeout(timer)
+      // Libère le tube : un serveur de sélection resté en arrière-plan le garde sinon ouvert tant qu'il vit.
+      child.stderr?.destroy()
       outcome()
     }
 
@@ -45,10 +47,16 @@ function attempt(command: ClipboardCommand, text: string, timeoutMs: number): Pr
     child.stderr?.on('data', (chunk) => {
       stderr += chunk.toString()
     })
-    // Un utilitaire qui sort sans lire stdin provoque un EPIPE : l'échec réel est rapporté par `close`.
+    // Un EPIPE sur stdin (binaire absent, ou sortie avant lecture) n'est pas l'échec à rapporter : celui-ci vient de
+    // l'événement `error` du processus (ENOENT) ou de `close` (sortie prématurée).
     child.stdin?.on('error', () => {})
     child.on('error', (failure: SpawnFailure) => {
       settle(() => (failure.code === 'ENOENT' ? resolve('missing') : reject(failure)))
+    })
+    // xclip et wl-copy laissent un serveur de sélection en arrière-plan qui peut hériter de stderr : `close` n'arriverait
+    // qu'à sa mort. Un code 0 se règle donc dès `exit` ; `close` reste le chemin d'échec, stderr y est complet.
+    child.on('exit', (code) => {
+      if (code === 0) settle(() => resolve('done'))
     })
     child.on('close', (code) => {
       settle(() =>
