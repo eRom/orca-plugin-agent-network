@@ -97,7 +97,7 @@ export function target(state: TargetState, id: TargetStatus['target'], harnesses
 
 export const ONE_TARGET_OF_EACH_STATE: TargetStatus[] = [
   target('installed', 'claude', ['claude']),
-  target('outdated', 'shared', ['codex', 'dsh']),
+  target('outdated', 'shared', ['codex', 'dsh', 'pi', 'opencode']),
   target('modified', 'grok', ['grok']),
   target('foreign', 'antigravity', ['antigravity']),
   target('absent-harness', 'grok', ['grok']),
@@ -106,14 +106,14 @@ export const ONE_TARGET_OF_EACH_STATE: TargetStatus[] = [
 
 export const ALL_INSTALLED: TargetStatus[] = [
   target('installed', 'claude', ['claude']),
-  target('installed', 'shared', ['codex', 'dsh']),
+  target('installed', 'shared', ['codex', 'dsh', 'pi', 'opencode']),
   target('installed', 'grok', ['grok']),
   target('installed', 'antigravity', ['antigravity'])
 ]
 
 export const NONE_INSTALLED: TargetStatus[] = [
   target('not-installed', 'claude', ['claude']),
-  target('not-installed', 'shared', ['codex', 'dsh']),
+  target('not-installed', 'shared', ['codex', 'dsh', 'pi', 'opencode']),
   target('absent-harness', 'grok', ['grok']),
   target('not-installed', 'antigravity', ['antigravity'])
 ]
@@ -121,7 +121,7 @@ export const NONE_INSTALLED: TargetStatus[] = [
 /** Ce que voit quelqu'un dont les quatre dossiers `agent-network` viennent d'ailleurs : ni installation, ni retrait possibles. */
 export const ALL_FOREIGN: TargetStatus[] = [
   target('foreign', 'claude', ['claude']),
-  target('foreign', 'shared', ['codex', 'dsh']),
+  target('foreign', 'shared', ['codex', 'dsh', 'pi', 'opencode']),
   target('foreign', 'grok', ['grok']),
   target('foreign', 'antigravity', ['antigravity'])
 ]

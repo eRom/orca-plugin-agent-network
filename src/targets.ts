@@ -21,8 +21,15 @@ export function skillTargets(home: string): readonly SkillTarget[] {
     { id: 'claude', harnesses: ['claude'], presence: [join(home, '.claude')], skillsDir: join(home, '.claude', 'skills') },
     {
       id: 'shared',
-      harnesses: ['codex', 'dsh'],
-      presence: [join(home, '.agents'), join(home, '.codex'), join(home, '.dsh')],
+      // Pi et OpenCode lisent aussi `~/.agents/skills` (OpenCode lit en plus `~/.claude/skills`).
+      harnesses: ['codex', 'dsh', 'pi', 'opencode'],
+      presence: [
+        join(home, '.agents'),
+        join(home, '.codex'),
+        join(home, '.dsh'),
+        join(home, '.pi'),
+        join(home, '.config', 'opencode')
+      ],
       skillsDir: join(home, '.agents', 'skills')
     },
     { id: 'grok', harnesses: ['grok'], presence: [join(home, '.grok')], skillsDir: join(home, '.grok', 'skills') },

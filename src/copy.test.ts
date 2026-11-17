@@ -1,6 +1,15 @@
 // L'abréviation d'un handle de terminal pour l'infobulle : les limites se contrôlent des deux côtés.
 import { assert, test } from 'orca/testing'
-import { shortHandle } from './copy'
+import { harnessName, harnessShortName, shortHandle } from './copy'
+
+test('Pi and OpenCode have a proper name, OpenCode an abbreviation for narrow rows', () => {
+  assert.equal(harnessName('pi'), 'Pi')
+  assert.equal(harnessName('opencode'), 'OpenCode')
+  assert.equal(harnessShortName('pi'), 'Pi')
+  assert.equal(harnessShortName('opencode'), 'OC')
+  assert.equal(harnessShortName('dsh-tui'), 'DSH')
+  assert.equal(harnessShortName('codex'), 'Codex')
+})
 
 test('a short handle is shown as is', () => {
   assert.equal(shortHandle('term_claude'), 'term_claude')

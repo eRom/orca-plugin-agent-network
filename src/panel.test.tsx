@@ -466,9 +466,9 @@ test('shows one dense line per target, and explains each distinct non-installed 
   assert.equal(view.find({ text: EN.labelled(EN.targetStates.installed, EN.targetStateHints.installed) }), null)
   assert.match(EN.targetStateHints.foreign, /not written by this plugin, left untouched/)
   assert.match(EN.targetStateHints.modified, /you changed the file, left untouched/)
-  // Une cible partagée tient sur une ligne : « Codex · DSH ».
-  assert.equal(view.find({ type: 'Text', text: 'Codex · DSH' })?.props.truncate, true)
-  // La cible partagée ne montre que l'icône de Codex, son libellé nomme les deux harnais.
+  // Une cible partagée tient sur une ligne : « Codex · DSH · Pi · OC ».
+  assert.equal(view.find({ type: 'Text', text: 'Codex · DSH · Pi · OC' })?.props.truncate, true)
+  // La cible partagée ne montre que l'icône de Codex, son libellé nomme tous ses harnais.
   const sources = view.findAll({ type: 'Image' }).map((image) => image.props.src)
   assert.ok(sources.includes('agent-icons/codex.png'))
   assert.equal(sources.includes('agent-icons/dsh.png'), false)
@@ -496,7 +496,7 @@ test('install button calls skill.install and shows the result', async () => {
   const feedback = view.find({ testId: 'action-feedback' })
   assert.ok(feedback)
   assert.match(feedback.text, /Claude Code: Installed/)
-  assert.match(feedback.text, /Codex · DSH: Skipped: third-party folder/)
+  assert.match(feedback.text, /Codex · DSH · Pi · OC: Skipped: third-party folder/)
   assert.match(feedback.text, /Grok: Harness not found/)
   await expectClean(view)
 })

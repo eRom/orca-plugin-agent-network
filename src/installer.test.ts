@@ -142,6 +142,16 @@ test('reports an absent harness without creating its folder', async () => {
   assert.equal((await store.load()).entries.length, 1)
 })
 
+test('Pi or OpenCode alone is enough to install the shared skills folder', async () => {
+  for (const marker of ['.pi', '.config/opencode']) {
+    const home = await makeHome(marker)
+    const { store } = memoryStore()
+    const report = await installSkill(home, SKILL_A, nodeFileSystem(), store)
+    assert.equal(resultOf(report.results, 'shared').outcome, 'written', marker)
+    assert.equal(await readFile(join(home, '.agents', 'skills', 'agent-network', 'SKILL.md'), 'utf8'), SKILL_A)
+  }
+})
+
 test('is idempotent', async () => {
   const home = await makeHome('.claude', '.codex', '.grok', '.gemini/config')
   const { store } = memoryStore()
@@ -283,7 +293,7 @@ test('readStatus reflects every state', async () => {
       ['antigravity', 'absent-harness']
     ]
   )
-  assert.deepEqual(current.find((item) => item.target === 'shared')?.harnesses, ['codex', 'dsh'])
+  assert.deepEqual(current.find((item) => item.target === 'shared')?.harnesses, ['codex', 'dsh', 'pi', 'opencode'])
   assert.equal(current.find((item) => item.target === 'claude')?.file, fileOf(home, 'claude'))
 
   const newer = await readStatus(home, SKILL_B, nodeFileSystem(), store)
