@@ -293,7 +293,7 @@ test('readStatus reflects every state', async () => {
       ['antigravity', 'absent-harness']
     ]
   )
-  assert.deepEqual(current.find((item) => item.target === 'shared')?.harnesses, ['codex', 'dsh', 'pi', 'opencode'])
+  assert.deepEqual(current.find((item) => item.target === 'shared')?.harnesses, ['codex', 'dsh', 'opencode', 'pi'])
   assert.equal(current.find((item) => item.target === 'claude')?.file, fileOf(home, 'claude'))
 
   const newer = await readStatus(home, SKILL_B, nodeFileSystem(), store)

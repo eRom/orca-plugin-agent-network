@@ -2,11 +2,11 @@
 import { assert, test } from 'orca/testing'
 import { harnessName, harnessShortName, shortHandle } from './copy'
 
-test('Pi and OpenCode have a proper name, OpenCode an abbreviation for narrow rows', () => {
+test('Pi and OpenCode keep their full name, even on narrow rows', () => {
   assert.equal(harnessName('pi'), 'Pi')
   assert.equal(harnessName('opencode'), 'OpenCode')
   assert.equal(harnessShortName('pi'), 'Pi')
-  assert.equal(harnessShortName('opencode'), 'OC')
+  assert.equal(harnessShortName('opencode'), 'OpenCode')
   assert.equal(harnessShortName('dsh-tui'), 'DSH')
   assert.equal(harnessShortName('codex'), 'Codex')
 })

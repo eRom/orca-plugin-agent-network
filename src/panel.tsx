@@ -535,7 +535,7 @@ export function messagesSummary(m: Messages, result: FeedResult | null): string 
   return m.messagesCount(result.items.length, unread)
 }
 
-/** « Claude Code », « Codex · DSH · Pi · OC » : assez court pour tenir sur une ligne à 360 px. */
+/** « Claude Code », « Codex · DSH · OpenCode · Pi » : assez court pour tenir sur une ligne à 360 px. */
 const targetLabel = (harnesses: readonly string[]): string => harnesses.map(harnessShortName).join(' · ')
 
 /** Une ligne par cible, sur une seule ligne : icône, harnais servis, libellé d'état à droite. L'explication se lit sous la liste. */

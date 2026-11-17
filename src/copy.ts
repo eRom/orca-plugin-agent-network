@@ -25,17 +25,14 @@ const HARNESS_NAMES: Record<string, string> = {
   opencode: 'OpenCode'
 }
 
-/** Abréviations pour les lignes étroites du panneau ; les autres harnais gardent leur nom propre. */
-const HARNESS_SHORT_NAMES: Record<string, string> = { dsh: 'DSH', opencode: 'OC' }
-
 /** Nom affichable d'un harnais ; un identifiant inconnu s'affiche tel quel. */
 export const harnessName = (id: string): string => {
   const canonical = canonicalAgentId(id) ?? id
   return HARNESS_NAMES[canonical] ?? canonical
 }
 
-/** Nom court d'un harnais, pour les lignes étroites du panneau : « DSH » pour DeepSeek Harness, « OC » pour OpenCode. */
-export const harnessShortName = (id: string): string => HARNESS_SHORT_NAMES[canonicalAgentId(id) ?? id] ?? harnessName(id)
+/** Nom court d'un harnais, pour les lignes étroites du panneau : « DSH » pour DeepSeek Harness. */
+export const harnessShortName = (id: string): string => (canonicalAgentId(id) === 'dsh' ? 'DSH' : harnessName(id))
 
 /** Handle d'un terminal Orca assez court pour une infobulle : `term_27a740ab-…` devient `term_…5da274`. */
 export function shortHandle(handle: string): string {
