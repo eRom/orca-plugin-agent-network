@@ -188,7 +188,7 @@ const fr: Messages = {
   messageRoute: (from, to) => `${from} → ${to}`,
   unknownSender: 'Expéditeur inconnu',
   instructionsHint: 'Installe les consignes qui apprennent à chaque harnais à écrire à ses voisins.',
-  instructionsInstalledCount: (installed, total) => `${installed} sur ${total} installées`,
+  instructionsInstalledCount: (installed, total) => `${installed} sur ${total} ${installed === 1 ? 'installée' : 'installées'}`,
   instructionsUpdateAvailable: 'Mise à jour disponible',
   instructionsNotInstalled: 'Non installées',
   install: 'Installer',

@@ -446,7 +446,8 @@ test('tells apart no workspace, no agent and no message', async () => {
   const empty = await open({ agents: () => EMPTY_WORKSPACE_AGENTS, feed: () => ({ items: [] }) })
   assert.equal(empty.view.find({ label: EN.noWorkspace }), null)
   assert.notEqual(empty.view.find({ text: EN.noAgents }), null)
-  assert.notEqual(empty.view.find({ text: EN.noMessages }), null)
+  // Le groupe Messages le dit une fois, dans sa description.
+  assert.equal(messagesGroup(empty.view)?.props.description, EN.noMessages)
   await expectClean(empty.view)
 })
 
@@ -1073,6 +1074,37 @@ test('the user choice is persisted and wins over the default after a remount', a
   await expectClean(closed.view)
 })
 
+// `mount` attend la fin des lectures en vol : l'état « en cours de lecture » ne se pose pas dans un panneau monté, on le pose à la règle.
+test('the instructions group stays collapsed while the state loads and the user never chose', () => {
+  assert.equal(panel.isInstructionsOpen(null, null, false), false)
+  // Le choix de l'utilisateur l'emporte, même pendant la lecture.
+  assert.equal(panel.isInstructionsOpen(true, null, false), true)
+  assert.equal(panel.isInstructionsOpen(false, null, true), false)
+  // La réponse arrive : rien d'installé, ouverte ; tout installé, repliée.
+  assert.equal(panel.isInstructionsOpen(null, { targets: NONE_INSTALLED }, false), true)
+  assert.equal(panel.isInstructionsOpen(null, { targets: ALL_INSTALLED }, false), false)
+})
+
+test('an install from the default-open state keeps the group open on its feedback, skipped warnings included', async () => {
+  const report: InstallReport = {
+    results: [
+      { target: 'claude', file: '/f', outcome: 'written' },
+      { target: 'shared', file: '/f', outcome: 'skipped-foreign' }
+    ]
+  }
+  const { view } = await open({ instructionsOpen: null, status: () => ({ targets: NONE_INSTALLED }), install: () => report })
+  assert.equal(view.valueOf(requireInstructions(view)), true)
+  await view.press({ type: 'Button', text: EN.install })
+  // Le worker annonce l'état installé : sans choix mémorisé, la section ne se referme pas sur le retour d'action.
+  await view.post('skill.changed', { targets: ALL_INSTALLED })
+  assert.equal(view.valueOf(requireInstructions(view)), true)
+  const feedback = view.find({ testId: 'action-feedback' })
+  assert.ok(feedback)
+  assert.equal(feedback.props.tone, 'warning')
+  assert.match(feedback.text, /Skipped: third-party folder/)
+  await expectClean(view)
+})
+
 test('an update never forces the group open once the user closed it', async () => {
   const { view } = await open({ instructionsOpen: false, status: () => ({ targets: ALL_INSTALLED }) })
   await view.post('skill.changed', { targets: ONE_TARGET_OF_EACH_STATE })
@@ -1129,13 +1161,23 @@ test('the summary is empty while loading, on an error, and without any harness t
 test('the summary counts installed targets among those whose harness exists', () => {
   assert.equal(summaryOf(['installed', 'installed', 'installed', 'absent-harness']), '3 of 3 installed')
   assert.equal(summaryOf(['installed', 'installed', 'installed', 'installed']), '4 of 4 installed')
-  assert.equal(summaryOf(['installed', 'not-installed', 'absent-harness', 'foreign']), '1 of 3 installed')
-  assert.equal(summaryOf(['installed', 'modified']), '1 of 2 installed')
+  // Un dossier tiers n'est ni compté ni au total : rien n'est à y installer.
+  assert.equal(summaryOf(['installed', 'not-installed', 'absent-harness', 'foreign']), '1 of 2 installed')
 })
 
-test('the summary says none installed, even when only third-party or edited folders exist', () => {
+test('the summary counts an edited target as installed, since the instructions are there', () => {
+  assert.equal(summaryOf(['installed', 'modified']), '2 of 2 installed')
+  assert.equal(summaryOf(['modified', 'not-installed']), '1 of 2 installed')
+  assert.equal(summaryOf(['foreign', 'modified']), '1 of 1 installed')
+})
+
+test('the summary is empty when only third-party folders and absent harnesses remain', () => {
+  assert.equal(summaryOf(['foreign', 'foreign', 'absent-harness']), null)
+})
+
+test('the summary says none installed when every managed target is missing', () => {
   assert.equal(summaryOf(['not-installed', 'not-installed', 'absent-harness']), EN.instructionsNotInstalled)
-  assert.equal(summaryOf(['foreign', 'modified']), EN.instructionsNotInstalled)
+  assert.equal(summaryOf(['foreign', 'not-installed']), EN.instructionsNotInstalled)
 })
 
 test('any outdated target turns the summary into an update notice, whatever the rest', () => {
@@ -1145,6 +1187,7 @@ test('any outdated target turns the summary into an update notice, whatever the 
 
 test('the summary is localized', () => {
   assert.equal(summaryOf(['installed', 'installed', 'not-installed'], 'fr'), '2 sur 3 installées')
+  assert.equal(summaryOf(['installed', 'not-installed'], 'fr'), '1 sur 2 installée')
   assert.equal(summaryOf(['not-installed'], 'fr'), 'Non installées')
   assert.equal(summaryOf(['outdated'], 'fr'), 'Mise à jour disponible')
 })
@@ -1213,15 +1256,25 @@ test('the messages group is titled and summarized in French when locale is fr', 
   await expectClean(view)
 })
 
-test('the closed messages group says when there is nothing, and stays quiet while loading or on an error', async () => {
+test('the closed messages group says when there is nothing, and when the feed is unavailable', async () => {
   const empty = await open({ messagesOpen: null, feed: () => ({ items: [] }) })
   assert.equal(requireMessages(empty.view).props.description, EN.noMessages)
   await expectClean(empty.view)
 
   const failing = await open({ messagesOpen: null, feed: () => ({ error: 'boom' }) })
-  assert.equal(requireMessages(failing.view).props.description, undefined)
+  assert.equal(requireMessages(failing.view).props.description, EN.feedUnavailableTitle)
   assert.equal(failing.view.valueOf(requireMessages(failing.view)), false)
   await expectClean(failing.view)
+})
+
+test('an open messages group with an empty feed draws no body: the description already says it', async () => {
+  const { view } = await open({ messagesOpen: true, feed: () => ({ items: [] }) })
+  const group = requireMessages(view)
+  assert.equal(view.valueOf(group), true)
+  assert.equal(group.props.description, EN.noMessages)
+  assert.equal(view.find({ type: 'Text', text: EN.noMessages }), null)
+  assert.equal(view.findAll({ text: EN.noMessages }).length, 0)
+  await expectClean(view)
 })
 
 test('the messages error and its retry are inside the group, visible once opened', async () => {
@@ -1235,9 +1288,10 @@ test('the messages error and its retry are inside the group, visible once opened
 
 const feedItem = (id: string, read: boolean) => ({ ...UNREAD_MESSAGE, id, read })
 
-test('the messages summary is empty while loading and on an error', () => {
+test('the messages summary is empty while loading, and names the failure on an error', () => {
   assert.equal(panel.messagesSummary(EN, null), null)
-  assert.equal(panel.messagesSummary(EN, { error: 'boom' }), null)
+  assert.equal(panel.messagesSummary(EN, { error: 'boom' }), EN.feedUnavailableTitle)
+  assert.equal(panel.messagesSummary(FR, { error: 'boom' }), FR.feedUnavailableTitle)
 })
 
 test('the messages summary says there is nothing without any message', () => {

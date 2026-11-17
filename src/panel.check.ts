@@ -31,6 +31,8 @@ export default defineCheck({
   // Même panneau en thème clair : c'est lui qui sert la variante d'icône `on-light/`.
   liveLight: {
     theme: 'light',
+    // Messages et Consignes ouvertes : tout installé les repliait, or ce scénario sert à voir les icônes de chaque ligne.
+    persisted: { plugin: { messagesOpen: true, instructionsOpen: true } },
     requests: {
       'locale.set': LOCALE_OK,
       'network.copyHandle': COPY_OK,
@@ -83,6 +85,8 @@ export default defineCheck({
   },
   // Une cible de chaque état des consignes (installé, à mettre à jour, modifié, tiers, harnais absent, non installé).
   everyTargetState: {
+    // Une cible à mettre à jour replierait la section : ici elle est ouverte pour dessiner chaque ligne et chaque phrase.
+    persisted: { plugin: { instructionsOpen: true } },
     requests: {
       'locale.set': LOCALE_OK,
       'network.copyHandle': COPY_OK,

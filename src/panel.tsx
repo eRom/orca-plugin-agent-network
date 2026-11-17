@@ -508,11 +508,8 @@ function renderMessagesSection(m: Messages) {
       </Stack>
     )
   } else if (result.items.length === 0) {
-    body = (
-      <Text muted size="xs">
-        {m.noMessages}
-      </Text>
-    )
+    // Le résumé du groupe dit déjà « aucun message » : le répéter dans le corps l'afficherait deux fois.
+    body = null
   } else {
     body = renderRuled(result.items.map((item) => ({ key: item.id, node: renderMessage(m, item) })))
   }
@@ -529,9 +526,10 @@ function renderMessagesSection(m: Messages) {
   )
 }
 
-/** Résumé d'une ligne du fil, lisible section repliée ; null tant que le fil se charge ou s'il est illisible. */
+/** Résumé d'une ligne du fil, lisible section repliée ; null tant que le fil se charge. Un fil illisible le dit aussi, repliée. */
 export function messagesSummary(m: Messages, result: FeedResult | null): string | null {
-  if (result === null || 'error' in result) return null
+  if (result === null) return null
+  if ('error' in result) return m.feedUnavailableTitle
   if (result.items.length === 0) return m.noMessages
   const unread = result.items.filter((item) => !item.read).length
   return m.messagesCount(result.items.length, unread)
@@ -617,23 +615,26 @@ function renderFeedback(m: Messages, current: Feedback, status: StatusResult | n
 
 /**
  * Résumé d'une ligne de l'état des consignes, lisible section repliée ; null tant que l'état est en cours de lecture,
- * illisible, ou sans cible dont le harnais existe. Les cibles au harnais absent ne comptent pas : rien n'est à y installer.
+ * illisible, ou sans cible que le plugin gère. Les cibles au harnais absent ou au dossier tiers ne comptent pas : rien n'est à y installer.
+ * Une cible modifiée compte comme installée : les consignes y sont, l'utilisateur les a retouchées.
  */
 export function instructionsSummary(m: Messages, status: StatusResult | null): string | null {
   if (status === null || status.error !== undefined) return null
-  const counted = status.targets.filter((target) => target.state !== 'absent-harness')
+  const counted = status.targets.filter((target) => target.state !== 'absent-harness' && target.state !== 'foreign')
   if (counted.length === 0) return null
   if (counted.some((target) => target.state === 'outdated')) return m.instructionsUpdateAvailable
-  const installed = counted.filter((target) => target.state === 'installed').length
+  const installed = counted.filter((target) => target.state === 'installed' || target.state === 'modified').length
   return installed === 0 ? m.instructionsNotInstalled : m.instructionsInstalledCount(installed, counted.length)
 }
 
 /**
  * Le choix de l'utilisateur l'emporte ; à défaut, la section est ouverte tant que rien n'est installé (ni à jour, ni à mettre à jour).
  * Repliée pendant la lecture de l'état : le cas courant (tout installé) ne s'ouvre pas pour se refermer aussitôt.
+ * Un retour d'action reste ouvert : sinon l'installation qui vient de réussir refermerait la section sur son propre retour.
  */
-function isInstructionsOpen(chosen: boolean | null, status: StatusResult | null): boolean {
+export function isInstructionsOpen(chosen: boolean | null, status: StatusResult | null, hasFeedback: boolean): boolean {
   if (chosen !== null) return chosen
+  if (hasFeedback) return true
   if (status === null) return false
   return !status.targets.some((target) => target.state === 'installed' || target.state === 'outdated')
 }
@@ -706,7 +707,7 @@ function renderInstructionsSection(m: Messages) {
     <Collapsible
       title={m.sectionInstructions}
       description={summary ?? undefined}
-      open={isInstructionsOpen(chosen, status)}
+      open={isInstructionsOpen(chosen, status, current !== null)}
       onChange={(next) => set(instructionsOpen, next)}
     >
       <Stack gap="sm">
