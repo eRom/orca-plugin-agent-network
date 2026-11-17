@@ -25,7 +25,7 @@ import {
   type ReadonlyAtom,
   type Tone
 } from 'orca'
-import { harnessName, harnessShortName, messagesFor, type Messages } from './copy'
+import { harnessName, harnessShortName, messagesFor, shortHandle, type Messages } from './copy'
 import type { FeedItem } from './feed'
 import { agentIcon } from './icons'
 import type { InstallReport, TargetState, UninstallReport } from './installer'
@@ -37,6 +37,8 @@ export const FEED_POLL_MS = 5000
 export const AGENTS_DEBOUNCE_MS = 300
 /** Idem pour le fil : une lecture coûte deux appels au CLI, on la laisse retomber plus longtemps. */
 export const FEED_DEBOUNCE_MS = 1000
+/** Durée de l'icône de validation sur le bouton qui vient de copier un ID. */
+export const COPIED_FEEDBACK_MS = 1500
 
 /** Retour de la dernière action sur les consignes, gardé brut pour être rendu dans la langue et avec les noms du moment. */
 type Feedback =
@@ -55,6 +57,10 @@ const statusResult = atom<StatusResult | null>(null)
 /** Vrai pendant une installation ou un retrait : les deux boutons sont alors grisés. */
 const busy = atom(false)
 const feedback = atom<Feedback | null>(null)
+/** Handle de l'agent dont l'ID vient d'être copié (son bouton montre une coche) ; null sinon. */
+const copiedHandle = atom<string | null>(null)
+/** Pourquoi la dernière copie a échoué, déjà localisé ; null tant qu'aucune n'a échoué. */
+const copyFailure = atom<string | null>(null)
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
@@ -64,7 +70,9 @@ const copy = (): Messages => messagesFor(env.locale)
 // --- Lectures ---------------------------------------------------------------------------------------------------
 
 /** Numéro de la dernière lecture lancée, par sujet : une réponse en retard sur une plus récente est jetée. */
-const latest = { agents: 0, feed: 0, status: 0 }
+const latest = { agents: 0, feed: 0, status: 0, copy: 0 }
+/** Minuteur de la coche : une seule à la fois, à l'échelle du module car l'action de copie vit hors de `setup`. */
+let copiedTimer: ReturnType<typeof setTimeout> | undefined
 /** Une relève est déjà en vol : la suivante attend, pour ne pas empiler les appels au CLI. */
 let feedInFlight = false
 /** Workspace de la dernière notification `workspace.changed` ; sert à reconnaître un vrai changement. */
@@ -106,6 +114,20 @@ async function loadStatus(): Promise<void> {
 }
 
 const loadAll = (): Promise<unknown> => Promise.all([loadAgents(), loadFeed(), loadStatus()])
+
+function clearCopiedTimer(): void {
+  if (copiedTimer === undefined) return
+  clearTimeout(copiedTimer)
+  copiedTimer = undefined
+}
+
+/** Efface la coche, l'échec et le minuteur ; une réponse de copie encore en vol est jetée. */
+function resetCopyState(): void {
+  latest.copy++
+  clearCopiedTimer()
+  set(copiedHandle, null)
+  set(copyFailure, null)
+}
 
 /** Tourne une fois avant le premier rendu ; ce qui est poussé dans `subscriptions` s'arrête avec le panneau. */
 export function setup(ctx: PanelContext): void {
@@ -165,6 +187,7 @@ export function setup(ctx: PanelContext): void {
       set(agentsView, null)
       set(feedResult, null)
       set(agentsFailure, null)
+      resetCopyState()
       void loadAll()
     })
   )
@@ -186,6 +209,9 @@ export function setup(ctx: PanelContext): void {
       clearInterval(poll)
       for (const timer of timers) clearTimeout(timer)
       timers.clear()
+      // La coche vit dans un minuteur du module : le panneau fermé, il ne doit plus tirer ni recevoir une réponse en retard.
+      latest.copy++
+      clearCopiedTimer()
     }
   })
 
@@ -211,6 +237,28 @@ async function runAction(kind: 'install' | 'uninstall'): Promise<void> {
     set(feedback, { kind: 'error', message: messageOf(error) })
   } finally {
     set(busy, false)
+  }
+}
+
+/** Demande au worker de copier l'ID d'un agent ; coche pendant `COPIED_FEEDBACK_MS` si c'est fait, ligne d'échec sinon. */
+async function copyHandle(handle: string): Promise<void> {
+  const ticket = ++latest.copy
+  set(copyFailure, null)
+  try {
+    const result = await plugin.request('network.copyHandle', { handle })
+    if (ticket !== latest.copy) return
+    if ('error' in result) {
+      set(copyFailure, result.error)
+      return
+    }
+    clearCopiedTimer()
+    set(copiedHandle, handle)
+    copiedTimer = setTimeout(() => {
+      copiedTimer = undefined
+      set(copiedHandle, null)
+    }, COPIED_FEEDBACK_MS)
+  } catch (error) {
+    if (ticket === latest.copy) set(copyFailure, copy().copyFailed(messageOf(error)))
   }
 }
 
@@ -289,7 +337,7 @@ function renderSectionHeader(title: string, hint: string | null, trailing: OrcaN
   )
 }
 
-function renderAgentRow(m: Messages, agent: AgentsView['agents'][number]) {
+function renderAgentRow(m: Messages, agent: AgentsView['agents'][number], copied: boolean) {
   const harness = agent.agent === null ? null : harnessName(agent.agent)
   const name = agent.title ?? harness ?? m.unnamedAgent
   return (
@@ -306,6 +354,17 @@ function renderAgentRow(m: Messages, agent: AgentsView['agents'][number]) {
       </Box>
       <Box key={`state-${agent.handle}`} shrink={false}>
         <Badge tone={AGENT_STATE_TONE[agent.state]}>{m.agentStates[agent.state]}</Badge>
+      </Box>
+      {/* Même variante et même taille que Actualiser, en tête de section : les icônes forment une colonne. */}
+      <Box key={`copy-${agent.handle}`} shrink={false}>
+        <IconButton
+          icon={copied ? 'check' : 'copy'}
+          label={m.copyHandle(name)}
+          tooltip={copied ? m.copied : m.copyHandleTooltip(shortHandle(agent.handle))}
+          variant="ghost"
+          size="sm"
+          onPress={() => copyHandle(agent.handle)}
+        />
       </Box>
     </Box>
   )
@@ -325,9 +384,20 @@ function renderAgentsStale(m: Messages) {
   )
 }
 
+/** Échec de la copie d'un ID : une ligne discrète sous la liste, sans cadre d'alerte. */
+function renderCopyFailure(message: string) {
+  return (
+    <Text key="copy-failure" tone="danger" size="xs">
+      {message}
+    </Text>
+  )
+}
+
 function renderAgentsSection(m: Messages) {
   const view = read(agentsView)
   const failure = read(agentsFailure)
+  const copied = read(copiedHandle)
+  const copyError = read(copyFailure)
   const refresh = <IconButton icon="refresh" label={m.refresh} variant="ghost" size="sm" onPress={loadAll} />
   let body
   if (view === null) {
@@ -356,8 +426,9 @@ function renderAgentsSection(m: Messages) {
   } else {
     body = (
       <Stack gap="xs">
-        {renderRuled(view.agents.map((agent) => ({ key: agent.handle, node: renderAgentRow(m, agent) })))}
+        {renderRuled(view.agents.map((agent) => ({ key: agent.handle, node: renderAgentRow(m, agent, agent.handle === copied) })))}
         {failure === null ? null : renderAgentsStale(m)}
+        {copyError === null ? null : renderCopyFailure(copyError)}
       </Stack>
     )
   }

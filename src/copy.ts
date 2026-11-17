@@ -32,6 +32,13 @@ export const harnessName = (id: string): string => {
 /** Nom court d'un harnais, pour les lignes étroites du panneau : « DSH » pour DeepSeek Harness. */
 export const harnessShortName = (id: string): string => (canonicalAgentId(id) === 'dsh' ? 'DSH' : harnessName(id))
 
+/** Handle d'un terminal Orca assez court pour une infobulle : `term_27a740ab-…` devient `term_…5da274`. */
+export function shortHandle(handle: string): string {
+  const prefix = 'term_'
+  if (!handle.startsWith(prefix) || handle.length - prefix.length <= 8) return handle
+  return `${prefix}…${handle.slice(-6)}`
+}
+
 export type Messages = {
   // Fil des messages : libellés des parties absentes de la liste des terminaux du workspace.
   /** Un terminal fermé, ou d'un autre workspace : le CLI ne permet pas de les distinguer. */
@@ -84,6 +91,12 @@ export type Messages = {
   /** Titre de l'erreur du fil : sans lui, Orca affiche un « Attention » générique. */
   feedUnavailableTitle: string
   refresh: string
+  /** Nom accessible du bouton qui copie l'ID d'un agent. */
+  copyHandle: (name: string) => string
+  /** Infobulle du bouton : l'ID (abrégé) qu'il copie. */
+  copyHandleTooltip: (handle: string) => string
+  /** Infobulle du bouton pendant la seconde et demie qui suit une copie réussie. */
+  copied: string
   /** Date du message illisible : le panneau n'invente pas d'heure. */
   unknownTime: string
   /** Le worker a répondu sans cible ni erreur : rien à installer ni à retirer. */
@@ -173,6 +186,9 @@ const fr: Messages = {
   retry: 'Réessayer',
   feedUnavailableTitle: 'Messages indisponibles',
   refresh: 'Actualiser',
+  copyHandle: (name) => `Copier l'ID de ${name}`,
+  copyHandleTooltip: (handle) => `Copier l'ID (${handle})`,
+  copied: 'Copié',
   unknownTime: 'heure inconnue',
   noTargets: 'Aucun dossier de consignes à afficher.'
 }
@@ -260,6 +276,9 @@ const en: Messages = {
   retry: 'Retry',
   feedUnavailableTitle: 'Messages unavailable',
   refresh: 'Refresh',
+  copyHandle: (name) => `Copy the ID of ${name}`,
+  copyHandleTooltip: (handle) => `Copy ID (${handle})`,
+  copied: 'Copied',
   unknownTime: 'unknown time',
   noTargets: 'No instruction folder to show.'
 }

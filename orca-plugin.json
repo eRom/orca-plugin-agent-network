@@ -2,7 +2,7 @@
   "manifestVersion": 2,
   "id": "agent-network",
   "name": "Agent Network",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Let coding agents in an Orca workspace message each other: installs the teammate instructions for each harness and shows the workspace's agents and their latest messages.",
   "author": { "name": "Romain Ecarnot", "url": "https://github.com/eRom" },
   "repository": "https://github.com/eRom/orca-plugin-agent-network",

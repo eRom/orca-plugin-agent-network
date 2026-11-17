@@ -13,12 +13,14 @@ import {
 } from './test-fixtures'
 
 const LOCALE_OK = { ok: true as const }
+const COPY_OK = { ok: true as const }
 
 export default defineCheck({
   // Réseau vivant : cinq agents dont un bloqué, le fil complet, aucune consigne posée.
   live: {
     requests: {
       'locale.set': LOCALE_OK,
+      'network.copyHandle': COPY_OK,
       'network.agents': LIVE_AGENTS,
       'network.feed': { items: FEED },
       'skill.status': { targets: NONE_INSTALLED }
@@ -29,6 +31,7 @@ export default defineCheck({
     theme: 'light',
     requests: {
       'locale.set': LOCALE_OK,
+      'network.copyHandle': COPY_OK,
       'network.agents': LIVE_AGENTS,
       'network.feed': { items: FEED },
       'skill.status': { targets: ALL_INSTALLED }
@@ -38,6 +41,7 @@ export default defineCheck({
   noWorkspace: {
     requests: {
       'locale.set': LOCALE_OK,
+      'network.copyHandle': COPY_OK,
       'network.agents': NO_WORKSPACE_AGENTS,
       'network.feed': { items: [] },
       'skill.status': { targets: NONE_INSTALLED }
@@ -47,6 +51,7 @@ export default defineCheck({
   emptyWorkspace: {
     requests: {
       'locale.set': LOCALE_OK,
+      'network.copyHandle': COPY_OK,
       'network.agents': EMPTY_WORKSPACE_AGENTS,
       'network.feed': { items: [] },
       'skill.status': { targets: ALL_INSTALLED }
@@ -56,6 +61,7 @@ export default defineCheck({
   feedError: {
     requests: {
       'locale.set': LOCALE_OK,
+      'network.copyHandle': COPY_OK,
       'network.agents': LIVE_AGENTS,
       'network.feed': { error: "Orca isn't answering: couldn't read the messages in time." },
       'skill.status': { targets: NONE_INSTALLED }
@@ -65,6 +71,7 @@ export default defineCheck({
   allThirdParty: {
     requests: {
       'locale.set': LOCALE_OK,
+      'network.copyHandle': COPY_OK,
       'network.agents': LIVE_AGENTS,
       'network.feed': { items: FEED },
       'skill.status': { targets: ALL_FOREIGN }
@@ -74,6 +81,7 @@ export default defineCheck({
   everyTargetState: {
     requests: {
       'locale.set': LOCALE_OK,
+      'network.copyHandle': COPY_OK,
       'network.agents': LIVE_AGENTS,
       'network.feed': { items: [] },
       'skill.status': { targets: ONE_TARGET_OF_EACH_STATE }

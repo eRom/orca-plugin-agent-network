@@ -36,6 +36,7 @@ The agent sends a message to the peer's terminal. The peer reads it, does the wo
 ## The Network panel
 
 - **Agents** of the focused workspace and their state (working, blocked, waiting, done), updated on Orca's agent status events.
+- **Copy ID** button on each agent row: copies the agent's terminal handle (`term_…`) to the clipboard, to paste it into a request to another agent.
 - **Messages**: the last 20 exchanged with a terminal of this workspace. They are read with `orca orchestration inbox`, never consumed, and refreshed every 5 seconds while the panel is visible.
 - **Install status per harness**, with Install and Remove buttons.
 

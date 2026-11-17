@@ -4,7 +4,7 @@ import { afterEach, assert, mockHost, mount, test } from 'orca/testing'
 import { MESSAGES } from './copy'
 import type { InstallReport, UninstallReport } from './installer'
 import * as panel from './panel'
-import type { AgentsView, FeedResult, StatusResult } from './protocol'
+import type { AgentsView, CopyResult, FeedResult, StatusResult } from './protocol'
 import {
   ALL_INSTALLED,
   EMPTY_WORKSPACE_AGENTS,
@@ -29,6 +29,7 @@ type Setup = {
   status?: () => StatusResult | Promise<StatusResult>
   install?: () => InstallReport
   uninstall?: () => UninstallReport
+  copyHandle?: (input: { handle: string }) => CopyResult
   theme?: 'light' | 'dark'
   locale?: string
   visible?: boolean
@@ -53,9 +54,10 @@ async function open(setup: Setup = {}) {
   const state = {
     agents: setup.agents ?? (() => LIVE_AGENTS),
     feed: setup.feed ?? (() => ({ items: FEED })),
-    status: setup.status ?? (() => ({ targets: NONE_INSTALLED }))
+    status: setup.status ?? (() => ({ targets: NONE_INSTALLED })),
+    copyHandle: setup.copyHandle ?? ((): CopyResult => ({ ok: true }))
   }
-  const calls = { agents: 0, feed: 0, status: 0, install: 0, uninstall: 0 }
+  const calls = { agents: 0, feed: 0, status: 0, install: 0, uninstall: 0, copied: [] as string[] }
   const requestOrder: string[] = []
   const locales: string[] = []
   const host = mockHost({
@@ -87,6 +89,10 @@ async function open(setup: Setup = {}) {
       'skill.uninstall': () => {
         calls.uninstall++
         return setup.uninstall ? setup.uninstall() : { results: [] }
+      },
+      'network.copyHandle': (input: { handle: string }) => {
+        calls.copied.push(input.handle)
+        return state.copyHandle(input)
       }
     }
   })
@@ -699,4 +705,117 @@ test('an agent reported as dsh-tui gets the dsh icon and the DeepSeek Harness na
 test('the remove button is a secondary outline button', async () => {
   const { view } = await open({ status: () => ({ targets: ALL_INSTALLED }) })
   assert.equal(view.find({ type: 'Button', text: EN.uninstall })?.props.variant, 'outline')
+})
+
+// --- Copier l'ID d'un agent -------------------------------------------------------------------------------------
+
+const copyButton = (view: View, name: string) => view.find({ label: EN.copyHandle(name) })
+
+test('each agent row ends with a ghost copy button named after the agent', async () => {
+  const { view } = await open()
+  const reviewer = copyButton(view, 'Reviewer')
+  assert.equal(reviewer?.props.icon, 'copy')
+  assert.equal(reviewer?.props.variant, 'ghost')
+  assert.equal(reviewer?.props.tooltip, EN.copyHandleTooltip('term_claude'))
+  const names = ['Reviewer', 'Builder', 'Grok', 'Docs', 'Scratch']
+  assert.equal(names.filter((name) => copyButton(view, name)?.props.icon === 'copy').length, 5)
+  await expectClean(view)
+})
+
+test('pressing copy sends that row handle and shows a check for 1.5 s', async () => {
+  await withFakeTimers(async () => {
+    const { view, calls } = await open()
+    await view.press({ label: EN.copyHandle('Builder') })
+    assert.deepEqual(calls.copied, ['term_codex'])
+    assert.equal(copyButton(view, 'Builder')?.props.icon, 'check')
+    assert.equal(copyButton(view, 'Builder')?.props.tooltip, EN.copied)
+    assert.equal(copyButton(view, 'Reviewer')?.props.icon, 'copy')
+    mock.timers.tick(panel.COPIED_FEEDBACK_MS - 1)
+    await view.settled()
+    assert.equal(copyButton(view, 'Builder')?.props.icon, 'check')
+    mock.timers.tick(1)
+    await view.settled()
+    assert.equal(copyButton(view, 'Builder')?.props.icon, 'copy')
+    await expectClean(view)
+  })
+})
+
+test('copying a second row moves the check and restarts the delay', async () => {
+  await withFakeTimers(async () => {
+    const { view } = await open()
+    await view.press({ label: EN.copyHandle('Builder') })
+    mock.timers.tick(1000)
+    await view.settled()
+    await view.press({ label: EN.copyHandle('Reviewer') })
+    assert.equal(copyButton(view, 'Reviewer')?.props.icon, 'check')
+    assert.equal(copyButton(view, 'Builder')?.props.icon, 'copy')
+    mock.timers.tick(600)
+    await view.settled()
+    assert.equal(copyButton(view, 'Reviewer')?.props.icon, 'check', 'the first timer did not end the second check')
+    mock.timers.tick(900)
+    await view.settled()
+    assert.equal(copyButton(view, 'Reviewer')?.props.icon, 'copy')
+    await expectClean(view)
+  })
+})
+
+test('closing the panel while the check is shown leaves no error', async () => {
+  await withFakeTimers(async () => {
+    const { view } = await open()
+    await view.press({ label: EN.copyHandle('Builder') })
+    await view.unmount()
+    mock.timers.tick(panel.COPIED_FEEDBACK_MS * 2)
+    await new Promise<void>((resolve) => resolve())
+    assert.deepEqual(view.errors, [])
+  })
+})
+
+test('a failed copy says why under the list, and the next copy clears it', async () => {
+  const { view, state } = await open({ copyHandle: () => ({ error: EN.copyFailed('boom') }) })
+  await view.press({ label: EN.copyHandle('Builder') })
+  assert.notEqual(view.find({ type: 'Text', text: EN.copyFailed('boom') }), null)
+  assert.equal(view.find({ type: 'Callout' }), null)
+  assert.equal(copyButton(view, 'Builder')?.props.icon, 'copy')
+  state.copyHandle = () => ({ ok: true })
+  await view.press({ label: EN.copyHandle('Builder') })
+  assert.equal(view.find({ type: 'Text', text: EN.copyFailed('boom') }), null)
+  await expectClean(view)
+})
+
+test('a rejected copy request is shown as a copy failure, never an unhandled rejection', async () => {
+  const { view } = await open({
+    copyHandle: () => {
+      throw new Error('worker unreachable')
+    }
+  })
+  await view.press({ label: EN.copyHandle('Builder') })
+  assert.notEqual(view.find({ type: 'Text', text: EN.copyFailed('worker unreachable') }), null)
+  await expectClean(view)
+})
+
+test('a workspace switch drops the copy failure and the check', async () => {
+  await withFakeTimers(async () => {
+    const { view, state } = await open({ copyHandle: () => ({ error: EN.copyFailed('boom') }) })
+    await view.emit('workspace.changed', { context: CONTEXT('w1', 'My workspace') })
+    await view.press({ label: EN.copyHandle('Builder') })
+    assert.notEqual(view.find({ type: 'Text', text: EN.copyFailed('boom') }), null)
+    state.copyHandle = () => ({ ok: true })
+    await view.press({ label: EN.copyHandle('Builder') })
+    assert.equal(copyButton(view, 'Builder')?.props.icon, 'check')
+    state.copyHandle = () => ({ error: EN.copyFailed('boom') })
+    await view.press({ label: EN.copyHandle('Reviewer') })
+    assert.notEqual(view.find({ type: 'Text', text: EN.copyFailed('boom') }), null)
+    state.agents = () => LIVE_AGENTS
+    await view.emit('workspace.changed', { context: CONTEXT('w2', 'Other workspace') })
+    assert.equal(view.find({ type: 'Text', text: EN.copyFailed('boom') }), null)
+    assert.equal(view.findAll({ type: 'IconButton' }).filter((button) => button.props.icon === 'check').length, 0, 'the check is gone too')
+    await expectClean(view)
+  })
+})
+
+test('copy labels are French when locale is fr', async () => {
+  const { view } = await open({ locale: 'fr-FR' })
+  assert.equal(view.find({ label: FR.copyHandle('Reviewer') })?.props.tooltip, FR.copyHandleTooltip('term_claude'))
+  assert.equal(view.find({ label: EN.copyHandle('Reviewer') }), null)
+  await expectClean(view)
 })
