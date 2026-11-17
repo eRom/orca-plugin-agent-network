@@ -29,6 +29,7 @@ In any agent of an Orca workspace, just ask:
 - "ask codex to review the diff of this branch"
 - "demande à grok de vérifier ce plan"
 - "who is on the network?" lists the peers (agent, title, handle)
+- "whoami" makes an agent answer with its own terminal handle; a handle given in a request (`term_…`) names the peer directly
 
 The agent sends a message to the peer's terminal. The peer reads it, does the work, answers with `reply`, and the answer comes back into the first terminal. Agents never poll: each one is woken by Orca when mail arrives.
 
