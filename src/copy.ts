@@ -79,6 +79,10 @@ export type Messages = {
   messageRoute: (from: string, to: string) => string
   unknownSender: string
   instructionsHint: string
+  /** Résumé visible quand la section Consignes est repliée : « 3 sur 4 installées ». */
+  instructionsInstalledCount: (installed: number, total: number) => string
+  instructionsUpdateAvailable: string
+  instructionsNotInstalled: string
   install: string
   update: string
   uninstall: string
@@ -177,6 +181,9 @@ const fr: Messages = {
   messageRoute: (from, to) => `${from} → ${to}`,
   unknownSender: 'Expéditeur inconnu',
   instructionsHint: 'Installe les consignes qui apprennent à chaque harnais à écrire à ses voisins.',
+  instructionsInstalledCount: (installed, total) => `${installed} sur ${total} installées`,
+  instructionsUpdateAvailable: 'Mise à jour disponible',
+  instructionsNotInstalled: 'Non installées',
   install: 'Installer',
   update: 'Mettre à jour',
   uninstall: 'Retirer',
@@ -267,6 +274,9 @@ const en: Messages = {
   messageRoute: (from, to) => `${from} → ${to}`,
   unknownSender: 'Unknown sender',
   instructionsHint: 'Install the instructions that teach each harness to message its neighbors.',
+  instructionsInstalledCount: (installed, total) => `${installed} of ${total} installed`,
+  instructionsUpdateAvailable: 'Update available',
+  instructionsNotInstalled: 'Not installed',
   install: 'Install',
   update: 'Update',
   uninstall: 'Remove',

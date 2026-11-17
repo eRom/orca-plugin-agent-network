@@ -6,6 +6,7 @@ import {
   Box,
   Button,
   Callout,
+  Collapsible,
   EmptyState,
   env,
   IconButton,
@@ -54,6 +55,11 @@ const agentsFailure = atom<string | null>(null)
 const feedResult = atom<FeedResult | null>(null)
 /** État des consignes par cible ; null tant que le worker n'a pas répondu. */
 const statusResult = atom<StatusResult | null>(null)
+/**
+ * Choix de l'utilisateur pour la section Consignes, conservé d'une ouverture du panneau à l'autre ; null tant qu'il n'a rien choisi.
+ * Null : la section est ouverte s'il n'y a rien d'installé, repliée sinon (voir `isInstructionsOpen`).
+ */
+const instructionsOpen = atom<boolean | null>('instructionsOpen', null, { persist: 'plugin' })
 /** Vrai pendant une installation ou un retrait : les deux boutons sont alors grisés. */
 const busy = atom(false)
 const feedback = atom<Feedback | null>(null)
@@ -591,8 +597,28 @@ function renderFeedback(m: Messages, current: Feedback, status: StatusResult | n
   )
 }
 
+/**
+ * Résumé d'une ligne de l'état des consignes, lisible section repliée ; null tant que l'état est en cours de lecture,
+ * illisible, ou sans cible dont le harnais existe. Les cibles au harnais absent ne comptent pas : rien n'est à y installer.
+ */
+export function instructionsSummary(m: Messages, status: StatusResult | null): string | null {
+  if (status === null || status.error !== undefined) return null
+  const counted = status.targets.filter((target) => target.state !== 'absent-harness')
+  if (counted.length === 0) return null
+  if (counted.some((target) => target.state === 'outdated')) return m.instructionsUpdateAvailable
+  const installed = counted.filter((target) => target.state === 'installed').length
+  return installed === 0 ? m.instructionsNotInstalled : m.instructionsInstalledCount(installed, counted.length)
+}
+
+/** Le choix de l'utilisateur l'emporte ; à défaut, la section est ouverte tant que rien n'est installé (ni à jour, ni à mettre à jour). */
+function isInstructionsOpen(chosen: boolean | null, status: StatusResult | null): boolean {
+  if (chosen !== null) return chosen
+  return !(status?.targets.some((target) => target.state === 'installed' || target.state === 'outdated') ?? false)
+}
+
 function renderInstructionsSection(m: Messages) {
   const status = read(statusResult)
+  const chosen = read(instructionsOpen)
   const current = read(feedback)
   const working = read(busy)
   let body
@@ -653,14 +679,21 @@ function renderInstructionsSection(m: Messages) {
       </Stack>
     )
   }
+  const summary = instructionsSummary(m, status)
   return (
-    <Stack gap="sm">
-      {renderSectionHeader(m.sectionInstructions, null)}
-      <Text muted size="xs">
-        {m.instructionsHint}
-      </Text>
-      {body}
-    </Stack>
+    <Collapsible
+      title={m.sectionInstructions}
+      description={summary ?? undefined}
+      open={isInstructionsOpen(chosen, status)}
+      onChange={(next) => set(instructionsOpen, next)}
+    >
+      <Stack gap="sm">
+        <Text muted size="xs">
+          {m.instructionsHint}
+        </Text>
+        {body}
+      </Stack>
+    </Collapsible>
   )
 }
 

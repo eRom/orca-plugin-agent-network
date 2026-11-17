@@ -33,6 +33,8 @@ type Setup = {
   theme?: 'light' | 'dark'
   locale?: string
   visible?: boolean
+  /** Choix mémorisé pour la section Consignes ; `true` par défaut, pour que les tests lisent son contenu sans la déplier. `null` : jamais choisi. */
+  instructionsOpen?: boolean | null
 }
 
 /** Panneaux montés par le test en cours : démontés après lui, même si une assertion a échoué avant `expectClean`. */
@@ -96,7 +98,13 @@ async function open(setup: Setup = {}) {
       }
     }
   })
-  const view = await mount(panel, { host, theme: setup.theme, locale: setup.locale ?? 'en-US', visible: setup.visible })
+  const view = await mount(panel, {
+    host,
+    theme: setup.theme,
+    locale: setup.locale ?? 'en-US',
+    visible: setup.visible,
+    persisted: { plugin: { instructionsOpen: setup.instructionsOpen === undefined ? true : setup.instructionsOpen } }
+  })
   mounted.push(view)
   return { view, state, calls, requestOrder, locales }
 }
@@ -525,7 +533,8 @@ test('renders in French when locale is fr', async () => {
   assert.notEqual(view.find({ text: FR.agentStates.blocked }), null)
   assert.notEqual(view.find({ text: FR.sectionAgents }), null)
   assert.notEqual(view.find({ text: FR.sectionMessages }), null)
-  assert.notEqual(view.find({ text: FR.sectionInstructions }), null)
+  // Le titre d'un groupe repliable est une propriété du composant, pas un texte dessiné dans son contenu.
+  assert.equal(view.find({ type: 'Collapsible' })?.props.title, FR.sectionInstructions)
   assert.notEqual(view.find({ text: FR.update }), null)
   assert.notEqual(view.find({ text: FR.labelled(FR.targetStates.foreign, FR.targetStateHints.foreign) }), null)
   assert.notEqual(view.find({ text: FR.unreadBadge }), null)
@@ -988,4 +997,137 @@ test('a workspace switch stops the old check timer, which must not reset a newer
       await expectClean(view)
     })
   })
+})
+
+// --- Section Consignes repliable ---------------------------------------------------------------------------------
+
+const instructionsGroup = (view: View) => view.find({ type: 'Collapsible' })
+
+test('the instructions group starts open when nothing is installed, hint and buttons included', async () => {
+  const { view } = await open({ instructionsOpen: null, status: () => ({ targets: NONE_INSTALLED }) })
+  const group = instructionsGroup(view)
+  assert.ok(group)
+  assert.equal(view.valueOf(group), true)
+  assert.notEqual(view.find({ text: EN.instructionsHint }), null)
+  assert.notEqual(view.find({ type: 'Button', text: EN.install }), null)
+  assert.equal(group.props.description, EN.instructionsNotInstalled)
+  await expectClean(view)
+})
+
+test('the instructions group starts closed when everything is installed, and the summary stays visible', async () => {
+  const { view } = await open({ instructionsOpen: null, status: () => ({ targets: ALL_INSTALLED }) })
+  const group = instructionsGroup(view)
+  assert.ok(group)
+  assert.equal(view.valueOf(group), false)
+  assert.equal(group.props.title, EN.sectionInstructions)
+  assert.equal(group.props.description, EN.instructionsInstalledCount(4, 4))
+  // Le contenu d'un groupe replié n'est pas dessiné.
+  assert.equal(view.find({ text: EN.instructionsHint }), null)
+  assert.equal(view.find({ type: 'Button', text: EN.uninstall }), null)
+  await expectClean(view)
+})
+
+test('opening the closed group shows the hint, the target rows and the buttons', async () => {
+  const { view } = await open({ instructionsOpen: null, status: () => ({ targets: ALL_INSTALLED }) })
+  await view.toggle({ type: 'Collapsible' })
+  assert.equal(view.valueOf({ type: 'Collapsible' }), true)
+  assert.notEqual(view.find({ text: EN.instructionsHint }), null)
+  assert.notEqual(view.find({ type: 'Button', text: EN.uninstall }), null)
+  await expectClean(view)
+})
+
+test('the user choice is persisted and wins over the default after a remount', async () => {
+  const first = await open({ instructionsOpen: null, status: () => ({ targets: ALL_INSTALLED }) })
+  assert.equal(first.view.persisted.plugin.instructionsOpen ?? null, null)
+  await first.view.toggle({ type: 'Collapsible' })
+  assert.equal(first.view.persisted.plugin.instructionsOpen, true)
+  const saved = first.view.persisted.plugin.instructionsOpen as boolean
+  await first.view.unmount()
+
+  // Rouvert avec le choix mémorisé : la section reste dépliée alors que tout est installé.
+  const reopened = await open({ instructionsOpen: saved, status: () => ({ targets: ALL_INSTALLED }) })
+  assert.equal(reopened.view.valueOf({ type: 'Collapsible' }), true)
+  // Fermée par l'utilisateur sur une installation vide : la section reste repliée.
+  await reopened.view.toggle({ type: 'Collapsible' })
+  assert.equal(reopened.view.persisted.plugin.instructionsOpen, false)
+  await reopened.view.unmount()
+  const closed = await open({ instructionsOpen: false, status: () => ({ targets: NONE_INSTALLED }) })
+  assert.equal(closed.view.valueOf({ type: 'Collapsible' }), false)
+  await expectClean(closed.view)
+})
+
+test('an update never forces the group open once the user closed it', async () => {
+  const { view } = await open({ instructionsOpen: false, status: () => ({ targets: ALL_INSTALLED }) })
+  await view.post('skill.changed', { targets: ONE_TARGET_OF_EACH_STATE })
+  const group = instructionsGroup(view)
+  assert.ok(group)
+  assert.equal(view.valueOf(group), false)
+  assert.equal(group.props.description, EN.instructionsUpdateAvailable)
+  await expectClean(view)
+})
+
+test('the summary says an update is available while the group is closed', async () => {
+  const { view } = await open({ instructionsOpen: null, status: () => ({ targets: ONE_TARGET_OF_EACH_STATE }) })
+  const group = instructionsGroup(view)
+  assert.ok(group)
+  assert.equal(view.valueOf(group), false)
+  assert.equal(group.props.description, EN.instructionsUpdateAvailable)
+  await expectClean(view)
+})
+
+test('the instructions group is titled and summarized in French when locale is fr', async () => {
+  const { view } = await open({ locale: 'fr-FR', instructionsOpen: null, status: () => ({ targets: ALL_INSTALLED }) })
+  const group = instructionsGroup(view)
+  assert.ok(group)
+  assert.equal(group.props.title, FR.sectionInstructions)
+  assert.equal(group.props.description, '4 sur 4 installées')
+  await expectClean(view)
+})
+
+test('the instructions group has no summary when the state cannot be read, and stays open to show why', async () => {
+  const { view } = await open({ instructionsOpen: null, status: () => ({ targets: [], error: 'boom' }) })
+  const group = instructionsGroup(view)
+  assert.ok(group)
+  assert.equal(group.props.description, undefined)
+  assert.equal(view.valueOf(group), true)
+  assert.notEqual(view.find({ type: 'Callout', text: /boom/ }), null)
+  await expectClean(view)
+})
+
+// --- Résumé de l'état des consignes ------------------------------------------------------------------------------
+
+const summaryOf = (states: Parameters<typeof target>[0][], locale: 'en' | 'fr' = 'en') =>
+  panel.instructionsSummary(
+    MESSAGES[locale],
+    { targets: states.map((state, index) => target(state, (['claude', 'shared', 'grok', 'antigravity'] as const)[index % 4], ['claude'])) }
+  )
+
+test('the summary is empty while loading, on an error, and without any harness to serve', () => {
+  assert.equal(panel.instructionsSummary(EN, null), null)
+  assert.equal(panel.instructionsSummary(EN, { targets: [], error: 'boom' }), null)
+  assert.equal(summaryOf([]), null)
+  assert.equal(summaryOf(['absent-harness', 'absent-harness']), null)
+})
+
+test('the summary counts installed targets among those whose harness exists', () => {
+  assert.equal(summaryOf(['installed', 'installed', 'installed', 'absent-harness']), '3 of 3 installed')
+  assert.equal(summaryOf(['installed', 'installed', 'installed', 'installed']), '4 of 4 installed')
+  assert.equal(summaryOf(['installed', 'not-installed', 'absent-harness', 'foreign']), '1 of 3 installed')
+  assert.equal(summaryOf(['installed', 'modified']), '1 of 2 installed')
+})
+
+test('the summary says none installed, even when only third-party or edited folders exist', () => {
+  assert.equal(summaryOf(['not-installed', 'not-installed', 'absent-harness']), EN.instructionsNotInstalled)
+  assert.equal(summaryOf(['foreign', 'modified']), EN.instructionsNotInstalled)
+})
+
+test('any outdated target turns the summary into an update notice, whatever the rest', () => {
+  assert.equal(summaryOf(['installed', 'outdated']), EN.instructionsUpdateAvailable)
+  assert.equal(summaryOf(['outdated', 'not-installed', 'absent-harness']), EN.instructionsUpdateAvailable)
+})
+
+test('the summary is localized', () => {
+  assert.equal(summaryOf(['installed', 'installed', 'not-installed'], 'fr'), '2 sur 3 installées')
+  assert.equal(summaryOf(['not-installed'], 'fr'), 'Non installées')
+  assert.equal(summaryOf(['outdated'], 'fr'), 'Mise à jour disponible')
 })
