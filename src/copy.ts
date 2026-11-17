@@ -44,6 +44,8 @@ export type Messages = {
   feedBadJson: string
   feedFailed: string
   statusFailed: (detail: string) => string
+  copyFailed: (detail: string) => string
+  clipboardUnavailable: string
   installFailed: (detail: string) => string
   uninstallFailed: (detail: string) => string
   installResult: (counts: InstallCounts) => string
@@ -97,6 +99,8 @@ const fr: Messages = {
   feedBadJson: "Réponse inattendue d'orca : les messages n'ont pas pu être lus.",
   feedFailed: "Les messages n'ont pas pu être lus.",
   statusFailed: (detail) => `État de l'installation illisible : ${detail}`,
+  copyFailed: (detail) => `Copie impossible : ${detail}`,
+  clipboardUnavailable: 'aucune commande de presse-papiers sur ce système',
   installFailed: (detail) => `Installation impossible : ${detail}`,
   uninstallFailed: (detail) => `Retrait impossible : ${detail}`,
   installResult: ({ done, skipped, failed, absent }) => {
@@ -182,6 +186,8 @@ const en: Messages = {
   feedBadJson: "Unexpected answer from orca: the messages couldn't be read.",
   feedFailed: "Couldn't read the messages.",
   statusFailed: (detail) => `Couldn't read the install status: ${detail}`,
+  copyFailed: (detail) => `Couldn't copy: ${detail}`,
+  clipboardUnavailable: 'no clipboard command found on this system',
   installFailed: (detail) => `Couldn't install: ${detail}`,
   uninstallFailed: (detail) => `Couldn't remove: ${detail}`,
   installResult: ({ done, skipped, failed, absent }) => {

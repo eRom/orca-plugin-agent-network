@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import type { JsonValue, OrcaWorkerApi } from 'orca/worker'
+import { ClipboardUnavailableError, createClipboardWriter } from './clipboard'
 import { localeOf, LOCALES, MESSAGES, type InstallCounts, type Locale, type Messages, type UninstallCounts } from './copy'
 import { fetchFeed } from './feed'
 import {
@@ -19,7 +20,7 @@ import {
   type UninstallReport
 } from './installer'
 import { createOrcaRunner, OrcaCliError, resolveOrcaBinary, type OrcaRunner } from './orca-cli'
-import type { AgentsView, FeedResult, StatusResult } from './protocol'
+import type { AgentsView, CopyResult, FeedResult, StatusResult } from './protocol'
 import { skillTargets } from './targets'
 
 /** Clé de stockage du registre des fichiers posés par l'installateur. */
@@ -39,6 +40,8 @@ export type WorkerDeps = {
   orcaBinary?: string
   /** Chemin de l'exécutable du worker, journalisé avec le binaire pour comprendre une résolution en repli. */
   execPath?: string
+  /** Écrit un texte dans le presse-papiers du système. */
+  writeClipboard(text: string): Promise<void>
 }
 
 export function defaultDeps(): WorkerDeps {
@@ -50,7 +53,8 @@ export function defaultDeps(): WorkerDeps {
     fs: nodeFileSystem(),
     runOrca: createOrcaRunner(orcaBinary),
     orcaBinary,
-    execPath: process.execPath
+    execPath: process.execPath,
+    writeClipboard: createClipboardWriter(process.platform, process.env)
   }
 }
 
@@ -248,6 +252,17 @@ export async function activateWith(orca: OrcaWorkerApi, deps: WorkerDeps): Promi
     } catch (error) {
       orca.log(`feed failed code=${error instanceof OrcaCliError ? error.code : 'unknown'}: ${messageOf(error)}`)
       return { error: feedErrorText(error) }
+    }
+  })
+
+  orca.panels.handle('network.copyHandle', async ({ handle }): Promise<CopyResult> => {
+    try {
+      await deps.writeClipboard(handle)
+      return { ok: true }
+    } catch (error) {
+      orca.log(`copy failed: ${messageOf(error)}`)
+      const detail = error instanceof ClipboardUnavailableError ? m().clipboardUnavailable : messageOf(error)
+      return { error: m().copyFailed(detail) }
     }
   })
 

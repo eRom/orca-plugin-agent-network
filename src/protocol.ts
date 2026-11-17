@@ -13,6 +13,9 @@ export type AgentsView = {
 /** Le fil, ou le message d'erreur localisé à afficher à sa place. */
 export type FeedResult = { items: FeedItem[] } | { error: string }
 
+/** La copie a abouti, ou le message d'erreur localisé à afficher. */
+export type CopyResult = { ok: true } | { error: string }
+
 /** `error` est renseigné quand l'état n'a pas pu être lu (droits, skill introuvable) : `targets` est alors vide. */
 export type StatusResult = { targets: TargetStatus[]; error?: string }
 
@@ -22,6 +25,8 @@ declare module 'orca' {
     'locale.set': { input: { locale: string }; output: { ok: true } }
     'network.agents': { output: AgentsView }
     'network.feed': { output: FeedResult }
+    /** Met le handle d'un agent dans le presse-papiers du système (le panneau n'y a pas accès). */
+    'network.copyHandle': { input: { handle: string }; output: CopyResult }
     'skill.status': { output: StatusResult }
     /** Seul chemin d'installation du panneau : la file de l'installateur ne sérialise que dans ce worker. */
     'skill.install': { output: InstallReport }

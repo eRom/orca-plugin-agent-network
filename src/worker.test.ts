@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, assert, hostError, mockHost, mountWorker, test } from 'orca/testing'
+import { ClipboardUnavailableError } from './clipboard'
 import { MESSAGES } from './copy'
 import { nodeFileSystem, type FileSystem } from './installer'
 import { OrcaCliError, type OrcaRunner } from './orca-cli'
@@ -37,7 +38,9 @@ const emptyFeedRunner: OrcaRunner = async (args) => (args[0] === 'terminal' ? { 
 
 async function makeDeps(overrides: Partial<WorkerDeps> = {}, dirs: string[] = ALL_HARNESSES): Promise<WorkerDeps & { home: string }> {
   const home = await makeHome(...dirs)
-  return { home, readSkill: async () => SKILL, fs: nodeFileSystem(), runOrca: emptyFeedRunner, ...overrides }
+  // Par défaut, le presse-papiers est un enregistreur : un test ne touche jamais celui du système.
+  const writeClipboard = async (): Promise<void> => {}
+  return { home, readSkill: async () => SKILL, fs: nodeFileSystem(), runOrca: emptyFeedRunner, writeClipboard, ...overrides }
 }
 
 const mount = (host: ReturnType<typeof mockHost>, deps: WorkerDeps) =>
@@ -169,6 +172,40 @@ test('network.feed returns a readable error when the CLI fails', async () => {
   }
   const worker = await mount(hostWith(), await makeDeps({ runOrca }))
   assert.deepEqual(await worker.request('network.feed'), { error: MESSAGES.en.feedFailed })
+  await worker.deactivate()
+})
+
+test('network.copyHandle writes the handle to the clipboard', async () => {
+  const written: string[] = []
+  const writeClipboard = async (text: string): Promise<void> => {
+    written.push(text)
+  }
+  const worker = await mount(hostWith(), await makeDeps({ writeClipboard }))
+  assert.deepEqual(await worker.request('network.copyHandle', { handle: 'term_codex' }), { ok: true })
+  assert.deepEqual(written, ['term_codex'])
+  await worker.deactivate()
+})
+
+test('network.copyHandle reports a missing clipboard command, localized', async () => {
+  const writeClipboard = async (): Promise<void> => {
+    throw new ClipboardUnavailableError(['pbcopy'])
+  }
+  const worker = await mount(hostWith(), await makeDeps({ writeClipboard }))
+  await worker.request('locale.set', { locale: 'fr-FR' })
+  assert.deepEqual(await worker.request('network.copyHandle', { handle: 'term_codex' }), {
+    error: MESSAGES.fr.copyFailed(MESSAGES.fr.clipboardUnavailable)
+  })
+  await worker.deactivate()
+})
+
+test('network.copyHandle reports any other failure without rejecting', async () => {
+  const writeClipboard = async (): Promise<void> => {
+    throw new Error('pbcopy exited with code 1: boom')
+  }
+  const worker = await mount(hostWith(), await makeDeps({ writeClipboard }))
+  assert.deepEqual(await worker.request('network.copyHandle', { handle: 'term_codex' }), {
+    error: MESSAGES.en.copyFailed('pbcopy exited with code 1: boom')
+  })
   await worker.deactivate()
 })
 
