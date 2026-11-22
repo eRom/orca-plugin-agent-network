@@ -228,7 +228,7 @@ export async function activateWith(orca: OrcaWorkerApi, deps: WorkerDeps): Promi
   /**
    * Dernier état connu par terminal, pour les agents des autres workspaces : `agents.list` ne rend que ceux du workspace affiché.
    * Alimenté par `agent.status.changed` (tous workspaces) et par chaque lecture d'`agents.list`. Copié dans le stockage du
-   * plugin : Orca arrête un worker inactif au bout d'une vingtaine de minutes, et la mémoire partirait avec lui.
+   * plugin : Orca arrête un worker inactif après 5 minutes (PLUGIN_WORKER_IDLE_REAP_MS du source d'Orca), et la mémoire partirait avec lui.
    */
   const stateCache = new Map<string, AgentStateEntry>()
   /** Contenu (sérialisé) du dernier état connu du stockage : sert à n'écrire que ce qui a changé. `null` : rien de valide stocké. */

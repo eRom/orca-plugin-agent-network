@@ -8,7 +8,7 @@
 
 ![The Network panel listing five agents of different harnesses and their messages, beside a Claude Code prompt asking Codex for a review](media/cover.png)
 
-Orca already ships a mailbox for agents (`orca orchestration send`, `check`, `reply`). What agents lack is the habit of using it with each other. Agent Network adds the teammate instructions (a skill) to every harness you have, so any agent knows how to find its peers, send a self-contained request and answer one it receives. A **Network** panel shows who is on the network and what they said. There is no background service and no extra CLI: the agents use Orca's own mail.
+Orca already ships a mailbox for agents (`orca orchestration send`, `check`, `reply`). What agents lack is the habit of using it with each other. Agent Network adds the teammate instructions (a skill) to every harness you have, so any agent knows how to find its peers, send a self-contained request and answer one it receives. A **Network** panel shows who is on the network and what they said. There is no daemon of its own and no extra CLI: the agents use Orca's own mail.
 
 ## Install
 
@@ -35,7 +35,7 @@ The agent sends a message to the peer's terminal. The peer reads it, does the wo
 
 ## The Network panel
 
-- **Agents** of every workspace, grouped by workspace folder; the focused workspace's group is highlighted. Each agent shows its state (working, blocked, waiting, done), updated on Orca's agent status events. An agent of another workspace shows no state until Orca has reported one since the plugin started.
+- **Agents** of every workspace, grouped by workspace folder; the focused workspace's group is highlighted. Each agent shows its state (working, blocked, waiting, done), updated on Orca's agent status events. An agent of another workspace shows no state until Orca reports a change of state for it.
 - **Copy ID** button on each agent row: copies the agent's terminal handle (`term_…`) to the clipboard, to paste it into a request to another agent, in this workspace or another.
 - **Messages**: the last 20 exchanged with a terminal of this workspace. They are read with `orca orchestration inbox`, never consumed, and refreshed every 5 seconds while the panel is visible.
 - **Install status per harness**, with Install and Remove buttons.
