@@ -90,9 +90,11 @@ export function buildAgentGroups({ terminals, focused, answers, floatingLabel }:
     const current = key === focusedKey
     const answer = answers.get(key) ?? null
     // Sans réponse exacte, le workspace affiché garde les lignes d'`agents.list` sans argument si on en a lues, sinon le CLI.
-    const agents = answer ?? (current && focused !== null && focused.rows.length > 0 ? focused.rows : agentTerminals.map(cliRow))
-    // L'hôte ne connaît aucun agent pour ce workspace (terminal fantôme du CLI) : rien à montrer, sauf s'il est affiché.
-    if (agents.length === 0 && !current) continue
+    const exact = answer ?? (current && focused !== null && focused.rows.length > 0 ? focused.rows : null)
+    // Le CLI reconnaît aussi un agent à son processus ou à son titre, l'hôte seulement à ses hooks : un agent sans hook garde
+    // sa ligne, sans état, pour que son ID reste copiable.
+    const untracked = exact === null ? agentTerminals : agentTerminals.filter((terminal) => !exact.some((entry) => entry.handle === terminal.handle))
+    const agents = [...(exact ?? []), ...untracked.map(cliRow)]
     groups.push({ id: key, name: groupName(members, floatingLabel), current, agents })
   }
 

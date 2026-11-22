@@ -133,14 +133,25 @@ test('one rejected workspace leaves the other groups with their exact rows', () 
   assert.equal(view.groups.find((group) => group.id === 'wt-b')?.agents[0]?.state, 'done')
 })
 
-test('a non-focused workspace the host knows no agent of makes no group', () => {
+test('an agent terminal the host does not track keeps its row, without state, after the exact rows', () => {
   const view = buildAgentGroups({
-    terminals: [terminal('a', 'wt', '/dev/repo', { agentIdentity: 'codex' })],
+    terminals: [
+      terminal('hooked', 'wt', '/dev/repo', { agentIdentity: 'claude' }),
+      terminal('hookless', 'wt', '/dev/repo', { agentIdentity: 'kimi', title: 'Scratch' }),
+      terminal('alone', 'wt-2', '/dev/other', { agentIdentity: 'codex' })
+    ],
     focused: null,
-    answers: new Map([['wt', []]]),
+    answers: new Map([
+      ['wt', [row('hooked', 'done', 3)]],
+      ['wt-2', []]
+    ]),
     floatingLabel: FLOATING
   })
-  assert.deepEqual(view, { groups: [] })
+  assert.deepEqual(view.groups.find((group) => group.id === 'wt')?.agents, [
+    row('hooked', 'done', 3),
+    { handle: 'hookless', agent: 'kimi', title: 'Scratch', state: null, since: null }
+  ])
+  assert.deepEqual(view.groups.find((group) => group.id === 'wt-2')?.agents.map((entry) => [entry.handle, entry.state]), [['alone', null]])
 })
 
 test('the focused group is the one holding the focused terminals, its rows are the answer, in its order', () => {
