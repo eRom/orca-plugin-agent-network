@@ -408,13 +408,14 @@ function renderCopyFailure(message: string) {
 
 /**
  * Un workspace : son nom en tête, puis ses agents en lignes à filet. Le groupe du workspace affiché est posé sur la surface
- * `card` (la surface `muted` est celle du badge neutre : sa pastille s'y perd) ; tous les groupes ont le même retrait, pour que les
+ * `muted`, seule surface visible en sombre (`card`, `neutral` et `accent` testés en vrai le 22/11). Sur ce fond, la pastille du
+ * badge neutre (« Working ») se fond, mais son texte reste lisible ; tous les groupes ont le même retrait, pour que les
  * lignes restent alignées d'un groupe à l'autre. Le bloc n'a pas de marge verticale : le nom a le même `paddingY` qu'une ligne,
  * donc l'espace au-dessus du nom égale celui sous la dernière ligne (le `paddingY` du bloc s'y ajouterait, côté bas seulement).
  */
 function renderAgentGroup(m: Messages, group: AgentsView['groups'][number], copied: string | null) {
   return (
-    <Box key={`group-${group.id}`} paddingX="sm" radius="md" background={group.current ? 'card' : 'none'}>
+    <Box key={`group-${group.id}`} paddingX="sm" radius="md" background={group.current ? 'muted' : 'none'}>
       <Box key={`group-header-${group.id}`} paddingY="sm">
         <Text size="xs" weight="semibold" muted={!group.current} truncate>
           {group.name}
