@@ -8,15 +8,16 @@ import {
   FEED,
   LIVE_AGENTS,
   NONE_INSTALLED,
-  NO_WORKSPACE_AGENTS,
-  ONE_TARGET_OF_EACH_STATE
+  NO_AGENTS,
+  ONE_TARGET_OF_EACH_STATE,
+  OTHER_WORKSPACE_AGENTS
 } from './test-fixtures'
 
 const LOCALE_OK = { ok: true as const }
 const COPY_OK = { ok: true as const }
 
 export default defineCheck({
-  // Réseau vivant : cinq agents dont un bloqué, le fil complet, aucune consigne posée.
+  // Réseau vivant : deux workspaces, sept agents dont un bloqué et un sans état connu, le fil complet, aucune consigne posée.
   live: {
     // La section Messages est repliée tant que l'utilisateur ne l'a pas ouverte : ici elle l'est, pour voir les lignes.
     persisted: { plugin: { messagesOpen: true } },
@@ -41,14 +42,25 @@ export default defineCheck({
       'skill.status': { targets: ALL_INSTALLED }
     }
   },
-  // Aucun workspace ouvert : un seul état vide, les consignes restent.
-  noWorkspace: {
+  // Aucun terminal d'agent nulle part : un seul état vide, les consignes restent.
+  noAgents: {
     requests: {
       'locale.set': LOCALE_OK,
       'network.copyHandle': COPY_OK,
-      'network.agents': NO_WORKSPACE_AGENTS,
+      'network.agents': NO_AGENTS,
       'network.feed': { items: [] },
       'skill.status': { targets: NONE_INSTALLED }
+    }
+  },
+  // L'autre workspace est affiché : la mise en évidence a changé de groupe, la liste est la même ; une ligne sans état connu.
+  otherFocused: {
+    persisted: { plugin: { messagesOpen: true, instructionsOpen: false } },
+    requests: {
+      'locale.set': LOCALE_OK,
+      'network.copyHandle': COPY_OK,
+      'network.agents': OTHER_WORKSPACE_AGENTS,
+      'network.feed': { items: FEED },
+      'skill.status': { targets: ALL_INSTALLED }
     }
   },
   // Workspace ouvert sans agent ni message.

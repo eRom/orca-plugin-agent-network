@@ -9,7 +9,8 @@ export const NOW = Date.now()
 
 const MINUTE = 60_000
 
-export const WORKSPACE_NAME = 'My workspace'
+export const WORKSPACE_NAME = 'agent-network'
+export const OTHER_WORKSPACE_NAME = 'agent-progress-sp'
 
 export const BLOCKED_AGENT = { handle: 'term_claude', agent: 'claude', title: 'Reviewer', state: 'blocked', since: NOW - 4 * MINUTE } as const
 export const WORKING_AGENT = { handle: 'term_codex', agent: 'codex', title: 'Builder', state: 'working', since: NOW - 12 * MINUTE } as const
@@ -17,21 +18,29 @@ export const WAITING_AGENT = { handle: 'term_grok', agent: 'grok', title: null, 
 export const DONE_AGENT = { handle: 'term_agy', agent: 'antigravity', title: 'Docs', state: 'done', since: NOW - 3 * 60 * MINUTE } as const
 /** Un agent sans icône livrée : le panneau dessine un monogramme. */
 export const UNKNOWN_AGENT = { handle: 'term_other', agent: 'kimi', title: 'Scratch', state: 'working', since: NOW - MINUTE } as const
+/** Un agent d'un autre workspace, dont le worker connaît l'état. */
+export const REMOTE_AGENT = { handle: 'term_remote', agent: 'claude', title: 'Lone harness', state: 'waiting', since: NOW - 7 * MINUTE } as const
+/** Un agent d'un autre workspace dont Orca n'a encore rien rapporté : ni état, ni durée. */
+export const SILENT_AGENT = { handle: 'term_far', agent: 'codex', title: 'Far away', state: null, since: null } as const
 
+/** Deux workspaces : celui qu'on regarde (en évidence) et un autre, rangés par nom. */
 export const LIVE_AGENTS: AgentsView = {
-  workspace: { name: WORKSPACE_NAME },
-  agents: [BLOCKED_AGENT, WORKING_AGENT, WAITING_AGENT, DONE_AGENT, UNKNOWN_AGENT]
+  groups: [
+    { id: 'wt-main', name: WORKSPACE_NAME, current: true, agents: [BLOCKED_AGENT, WORKING_AGENT, WAITING_AGENT, DONE_AGENT, UNKNOWN_AGENT] },
+    { id: 'wt-other', name: OTHER_WORKSPACE_NAME, current: false, agents: [REMOTE_AGENT, SILENT_AGENT] }
+  ]
 }
 
-/** Autre workspace, pour les tests de bascule. */
+/** La même liste une fois l'autre workspace affiché : seule la mise en évidence a bougé. */
 export const OTHER_WORKSPACE_AGENTS: AgentsView = {
-  workspace: { name: 'Other workspace' },
-  agents: [{ handle: 'term_dsh', agent: 'dsh', title: 'Lone harness', state: 'waiting', since: NOW - 2 * MINUTE }]
+  groups: LIVE_AGENTS.groups.map((group) => ({ ...group, current: !group.current }))
 }
 
-export const NO_WORKSPACE_AGENTS: AgentsView = { workspace: null, agents: [] }
+/** Aucun terminal d'agent nulle part. */
+export const NO_AGENTS: AgentsView = { groups: [] }
 
-export const EMPTY_WORKSPACE_AGENTS: AgentsView = { workspace: { name: WORKSPACE_NAME }, agents: [] }
+/** Le workspace affiché n'a pas d'agent : son groupe reste, pour dire où l'on est. */
+export const EMPTY_WORKSPACE_AGENTS: AgentsView = { groups: [{ id: 'wt-main', name: WORKSPACE_NAME, current: true, agents: [] }] }
 
 const party = (handle: string, agent: string | null, title: string | null, live = true): Party => ({
   handle,

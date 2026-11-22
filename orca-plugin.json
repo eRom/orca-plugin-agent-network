@@ -43,6 +43,7 @@
     { "kind": "storage:own" }
   ],
   "contributes": {
+    "events": [{ "on": "agent.status.changed" }],
     "panels": [
       { "id": "network", "title": "Network", "icon": "link", "entry": "src/panel.tsx", "ui": "components" }
     ],

@@ -72,7 +72,10 @@ export type Messages = {
   sectionAgents: string
   sectionMessages: string
   sectionInstructions: string
-  noWorkspace: string
+  /** Aucun terminal d'agent dans aucun workspace. */
+  noAgentsAnywhere: string
+  /** Nom du groupe des terminaux hors workspace (le terminal flottant d'Orca). */
+  floatingTerminal: string
   noAgents: string
   unnamedAgent: string
   noMessages: string
@@ -176,7 +179,8 @@ const fr: Messages = {
   sectionAgents: 'Agents',
   sectionMessages: 'Messages',
   sectionInstructions: 'Consignes',
-  noWorkspace: 'Ouvre un workspace pour voir ses agents.',
+  noAgentsAnywhere: 'Aucun agent dans les workspaces.',
+  floatingTerminal: 'Terminal flottant',
   noAgents: 'Aucun agent dans ce workspace.',
   unnamedAgent: 'Terminal',
   noMessages: 'Aucun message pour le moment.',
@@ -274,7 +278,8 @@ const en: Messages = {
   sectionAgents: 'Agents',
   sectionMessages: 'Messages',
   sectionInstructions: 'Instructions',
-  noWorkspace: 'Open a workspace to see its agents.',
+  noAgentsAnywhere: 'No agents in any workspace.',
+  floatingTerminal: 'Floating terminal',
   noAgents: 'No agents in this workspace.',
   unnamedAgent: 'Terminal',
   noMessages: 'No messages yet.',

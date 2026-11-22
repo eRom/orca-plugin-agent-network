@@ -7,12 +7,17 @@ import * as panel from './panel'
 import type { AgentsView, CopyResult, FeedResult, StatusResult } from './protocol'
 import {
   ALL_INSTALLED,
+  BLOCKED_AGENT,
   EMPTY_WORKSPACE_AGENTS,
   FEED,
   LIVE_AGENTS,
   LONG_PREVIEW,
   NONE_INSTALLED,
-  NO_WORKSPACE_AGENTS,
+  OTHER_WORKSPACE_NAME,
+  REMOTE_AGENT,
+  SILENT_AGENT,
+  WORKSPACE_NAME,
+  NO_AGENTS,
   ONE_TARGET_OF_EACH_STATE,
   target,
   OTHER_WORKSPACE_AGENTS,
@@ -143,7 +148,73 @@ async function withFakeTimers(body: () => Promise<void>): Promise<void> {
   }
 }
 
+type TreeNode = NonNullable<ReturnType<View['tree']>>
+
+/** Les nœuds de l'arbre dessiné qui vérifient `matches`, en profondeur (`findAll` ne rend que les éléments les plus internes). */
+const nodesWhere = (node: TreeNode | null, matches: (node: Exclude<TreeNode, string>) => boolean): Exclude<TreeNode, string>[] => {
+  if (node === null || typeof node === 'string') return []
+  return (matches(node) ? [node] : []).concat((node.children ?? []).flatMap((child) => nodesWhere(child, matches)))
+}
+
+/** Identifiants des groupes d'agents mis en évidence (fond `muted`) : le workspace affiché, normalement un seul. */
+const currentGroupIds = (view: View): string[] =>
+  [LIVE_AGENTS, OTHER_WORKSPACE_AGENTS]
+    .flatMap((agents) => agents.groups.map((group) => group.id))
+    .filter((id, index, ids) => ids.indexOf(id) === index)
+    .filter((id) => view.find({ testId: `group-${id}` })?.props.background === 'muted')
+
 // --- Agents -----------------------------------------------------------------------------------------------------
+
+test('groups agents by workspace, names above their rows, the shown workspace highlighted', async () => {
+  const { view } = await open()
+  assert.notEqual(view.find({ type: 'Text', text: WORKSPACE_NAME }), null)
+  assert.notEqual(view.find({ type: 'Text', text: OTHER_WORKSPACE_NAME }), null)
+  assert.equal(view.find({ type: 'Text', text: WORKSPACE_NAME })?.props.truncate, true)
+  assert.deepEqual(currentGroupIds(view), ['wt-main'])
+  assert.equal(view.find({ testId: 'group-wt-other' })?.props.background, 'none')
+  // Chaque agent est dans le bloc de son workspace, l'ID d'un agent d'un autre workspace se copie aussi.
+  assert.equal(view.find({ testId: 'group-wt-main' })?.text.includes('Reviewer'), true)
+  assert.equal(view.find({ testId: 'group-wt-main' })?.text.includes(REMOTE_AGENT.title), false)
+  assert.equal(view.find({ testId: 'group-wt-other' })?.text.includes(REMOTE_AGENT.title), true)
+  // L'ordre est celui du worker.
+  const text = JSON.stringify(view.tree())
+  assert.ok(text.indexOf(WORKSPACE_NAME) < text.indexOf(OTHER_WORKSPACE_NAME))
+  // Le titre de la section ne porte plus de nom de workspace.
+  assert.equal(view.find({ testId: 'title-Agents' })?.text, EN.sectionAgents)
+  await expectClean(view)
+})
+
+test('an agent of another workspace can be copied by its handle', async () => {
+  const { view, calls } = await open()
+  await view.press({ label: EN.copyHandle(REMOTE_AGENT.title) })
+  assert.deepEqual(calls.copied, [REMOTE_AGENT.handle])
+  assert.equal(view.find({ label: EN.copyHandle(REMOTE_AGENT.title) })?.props.icon, 'check')
+  await expectClean(view)
+})
+
+test('an agent whose state is unknown has no badge and no time, only its harness', async () => {
+  const { view } = await open()
+  const row = view.find({ testId: `agent-${SILENT_AGENT.handle}` })
+  assert.ok(row)
+  assert.equal(row.text.includes(SILENT_AGENT.title), true)
+  assert.equal(row.text.includes('Codex'), true, 'the subline keeps the harness name')
+  assert.equal(view.find({ testId: `state-${SILENT_AGENT.handle}` }), null, 'no state badge')
+  assert.equal(view.findAll({ type: 'RelativeTime' }).some((time) => time.props.at === null), false)
+  // Les agents dont l'état est connu gardent leur pastille.
+  assert.notEqual(view.find({ testId: `state-${REMOTE_AGENT.handle}` }), null)
+  assert.notEqual(view.find({ testId: `state-${BLOCKED_AGENT.handle}` }), null)
+  await expectClean(view)
+})
+
+test('an untitled agent with an unknown state shows its harness name only once', async () => {
+  const agents: AgentsView = {
+    groups: [{ id: 'wt', name: 'Workspace', current: false, agents: [{ handle: 'term_x', agent: 'grok', title: null, state: null, since: null }] }]
+  }
+  const { view } = await open({ agents: () => agents })
+  // Le nom de la ligne est le harnais : pas de seconde ligne qui le répète.
+  assert.equal(view.find({ testId: 'agent-term_x' })?.text, 'Grok')
+  await expectClean(view)
+})
 
 test('shows a blocked agent distinctly', async () => {
   const { view } = await open()
@@ -164,9 +235,13 @@ test('shows a blocked agent distinctly', async () => {
 
 test('draws flat rows separated by rules: no card, no border, no filled row', async () => {
   const { view } = await open({ status: () => ({ targets: ONE_TARGET_OF_EACH_STATE }) })
+  // Seuls les blocs de workspace sont arrondis, et seul celui du workspace affiché a un fond ; aucune ligne n'a de cadre.
   assert.equal(view.findAll({ type: 'Box' }).filter((box) => box.props.border !== undefined || box.props.radius === 'md').length, 0)
-  // Cinq agents, quatre messages et six cibles : un filet entre deux lignes consécutives, pas autour.
-  assert.equal(view.findAll({ type: 'Separator' }).length, 4 + 3 + 5)
+  const surfaces = nodesWhere(view.tree(), (node) => node.props?.radius === 'md' || node.props?.border !== undefined || node.props?.background === 'card')
+  assert.deepEqual(surfaces.map((node) => node.key), ['group-wt-main', 'group-wt-other'])
+  assert.deepEqual(surfaces.map((node) => node.props?.background), ['muted', 'none'])
+  // Cinq agents puis deux dans l'autre workspace, quatre messages et six cibles : un filet entre deux lignes d'une même liste, pas autour.
+  assert.equal(view.findAll({ type: 'Separator' }).length, 4 + 1 + 3 + 5)
   await expectClean(view)
 })
 
@@ -178,7 +253,7 @@ test('lists an agent by title, then by harness name, with its icon and the time 
   const icons = view.findAll({ type: 'Image' }).map((image) => image.props.src)
   for (const id of ['claude', 'codex', 'grok', 'antigravity']) assert.ok(icons.includes(`agent-icons/${id}.png`), id)
   const times = view.findAll({ type: 'RelativeTime' }).map((time) => time.props.at)
-  assert.ok(times.includes(LIVE_AGENTS.agents[0]!.since), 'the blocked agent shows since when')
+  assert.ok(times.includes(BLOCKED_AGENT.since), 'the blocked agent shows since when')
   await expectClean(view)
 })
 
@@ -254,35 +329,41 @@ test('the context Orca delivers on subscribe does not trigger a second round of 
   })
 })
 
-test('switches workspace on workspace.changed', async () => {
+test('switches workspace on workspace.changed: the agent list stays, the highlight moves, the feed is reloaded', async () => {
   const { view, state, calls } = await open()
   await view.emit('workspace.changed', { context: CONTEXT('w1', 'My workspace') })
-  assert.notEqual(view.find({ type: 'Text', text: 'Reviewer' }), null)
+  assert.equal(currentGroupIds(view).join(), 'wt-main')
   const before = { ...calls }
   state.agents = () => OTHER_WORKSPACE_AGENTS
   state.feed = () => ({ items: [] })
   await view.emit('workspace.changed', { context: CONTEXT('w2', 'Other workspace') })
-  assert.equal(view.find({ type: 'Text', text: 'Reviewer' }), null)
+  // Les agents des deux workspaces sont toujours là, seul le groupe en évidence a changé.
+  assert.notEqual(view.find({ type: 'Text', text: 'Reviewer' }), null)
   assert.notEqual(view.find({ type: 'Text', text: 'Lone harness' }), null)
-  assert.equal(view.find({ text: UNREAD_MESSAGE.subject }), null, 'the old feed is gone too')
+  assert.equal(currentGroupIds(view).join(), 'wt-other')
+  assert.equal(view.find({ text: UNREAD_MESSAGE.subject }), null, 'the old feed is gone')
   assert.equal(calls.agents, before.agents + 1)
   assert.equal(calls.feed, before.feed + 1)
   assert.equal(calls.status, before.status + 1)
   await expectClean(view)
 })
 
-test('blanks the old workspace at once while the new one loads', async () => {
+test('keeps the agent list on screen at once while a workspace switch reloads it, but blanks the old feed', async () => {
   const { view, state } = await open()
   await view.emit('workspace.changed', { context: CONTEXT('w1', 'My workspace') })
   let release: (view: AgentsView) => void = () => undefined
   state.agents = () => new Promise<AgentsView>((resolve) => (release = resolve))
+  let releaseFeed: (result: FeedResult) => void = () => undefined
+  state.feed = () => new Promise<FeedResult>((resolve) => (releaseFeed = resolve))
   const switching = view.emit('workspace.changed', { context: CONTEXT('w2', 'Other workspace') })
   await new Promise<void>((resolve) => setTimeout(resolve, 20))
-  assert.equal(view.find({ type: 'Text', text: 'Reviewer' }), null, 'cleared immediately')
-  assert.notEqual(view.find({ type: 'Skeleton' }), null)
+  assert.notEqual(view.find({ type: 'Text', text: 'Reviewer' }), null, 'the list is global: no blank while it reloads')
+  assert.equal(currentGroupIds(view).join(), 'wt-main', 'the highlight moves only with the answer')
+  assert.equal(view.find({ text: UNREAD_MESSAGE.subject }), null, 'the previous workspace feed is gone')
   release(OTHER_WORKSPACE_AGENTS)
+  releaseFeed({ items: [] })
   await switching
-  assert.notEqual(view.find({ type: 'Text', text: 'Lone harness' }), null)
+  assert.equal(currentGroupIds(view).join(), 'wt-other')
   await expectClean(view)
 })
 
@@ -321,8 +402,7 @@ test('drops the answer of a read that a newer one has outrun', async () => {
   await new Promise<void>((resolve) => setTimeout(resolve, 20))
   release(LIVE_AGENTS)
   await Promise.all([first, second])
-  assert.notEqual(view.find({ type: 'Text', text: 'Lone harness' }), null, 'the older answer does not come back')
-  assert.equal(view.find({ type: 'Text', text: 'Reviewer' }), null)
+  assert.equal(currentGroupIds(view).join(), 'wt-other', 'the older answer does not come back')
   await expectClean(view)
 })
 
@@ -434,18 +514,20 @@ test('keeps agents when the feed fails, and says why', async () => {
   await expectClean(view)
 })
 
-test('tells apart no workspace, no agent and no message', async () => {
-  const noWorkspace = await open({ agents: () => NO_WORKSPACE_AGENTS, feed: () => ({ items: [] }) })
-  assert.notEqual(noWorkspace.view.find({ label: EN.noWorkspace }), null)
-  assert.equal(noWorkspace.view.find({ text: EN.noAgents }), null)
-  assert.equal(noWorkspace.view.find({ text: EN.noMessages }), null)
-  // Les consignes ne dépendent pas du workspace.
-  assert.notEqual(noWorkspace.view.find({ text: EN.install }), null)
-  await expectClean(noWorkspace.view)
+test('tells apart no agent anywhere, no agent in the shown workspace and no message', async () => {
+  const none = await open({ agents: () => NO_AGENTS, feed: () => ({ items: [] }) })
+  assert.notEqual(none.view.find({ type: 'Text', text: EN.noAgentsAnywhere }), null)
+  assert.equal(none.view.find({ text: EN.noAgents }), null)
+  assert.equal(none.view.find({ text: EN.noMessages }), null)
+  // Les consignes ne dépendent pas des agents.
+  assert.notEqual(none.view.find({ text: EN.install }), null)
+  await expectClean(none.view)
 
+  // Le workspace affiché n'a pas d'agent : son groupe reste, avec son nom et une ligne atténuée.
   const empty = await open({ agents: () => EMPTY_WORKSPACE_AGENTS, feed: () => ({ items: [] }) })
-  assert.equal(empty.view.find({ label: EN.noWorkspace }), null)
-  assert.notEqual(empty.view.find({ text: EN.noAgents }), null)
+  assert.equal(empty.view.find({ text: EN.noAgentsAnywhere }), null)
+  assert.notEqual(empty.view.find({ type: 'Text', text: WORKSPACE_NAME }), null)
+  assert.equal(empty.view.find({ type: 'Text', text: EN.noAgents })?.props.muted, true)
   // Le groupe Messages le dit une fois, dans sa description.
   assert.equal(messagesGroup(empty.view)?.props.description, EN.noMessages)
   await expectClean(empty.view)
@@ -703,10 +785,10 @@ test('a failed reload with an empty agent list says so, with Retry, instead of s
 test('every agent row and every target row use the same icon slot width, so labels align across sections', async () => {
   const { view } = await open({ status: () => ({ targets: ONE_TARGET_OF_EACH_STATE }) })
   // `findAll` ne rend que les éléments les plus internes : on retrouve chaque emplacement par sa clé.
-  const agentSlots = LIVE_AGENTS.agents.filter((agent) => agent.agent !== 'kimi').map((agent) => view.find({ testId: `lead-${agent.handle}` }))
+  const agentSlots = LIVE_AGENTS.groups.flatMap((group) => group.agents).filter((agent) => agent.agent !== 'kimi').map((agent) => view.find({ testId: `lead-${agent.handle}` }))
   const targetSlots = ONE_TARGET_OF_EACH_STATE.map((entry, index) => view.find({ testId: `lead-target-${index}-${entry.target}` }))
   const slots = [...agentSlots, ...targetSlots]
-  assert.equal(slots.filter((slot) => slot !== null).length, 4 + ONE_TARGET_OF_EACH_STATE.length)
+  assert.equal(slots.filter((slot) => slot !== null).length, 4 + 2 + ONE_TARGET_OF_EACH_STATE.length)
   assert.equal(new Set(slots.map((slot) => slot?.props.width)).size, 1)
   assert.equal(typeof slots[0]?.props.width, 'number')
   await expectClean(view)
@@ -714,8 +796,7 @@ test('every agent row and every target row use the same icon slot width, so labe
 
 test('an agent reported as dsh-tui gets the dsh icon and the DeepSeek Harness name', async () => {
   const agents: AgentsView = {
-    workspace: { name: 'Workspace' },
-    agents: [{ handle: 'term_dsh', agent: 'dsh-tui', title: null, state: 'waiting', since: 1000 }]
+    groups: [{ id: 'wt', name: 'Workspace', current: true, agents: [{ handle: 'term_dsh', agent: 'dsh-tui', title: null, state: 'waiting', since: 1000 }] }]
   }
   const { view } = await open({ agents: () => agents })
   assert.ok(view.findAll({ type: 'Image' }).some((image) => image.props.src === 'agent-icons/dsh.png'))
@@ -731,8 +812,6 @@ test('the remove button is a secondary outline button', async () => {
 
 const copyButton = (view: View, name: string) => view.find({ label: EN.copyHandle(name) })
 
-type TreeNode = NonNullable<ReturnType<View['tree']>>
-
 /** Les nœuds de l'arbre dessiné dont la clé commence par `prefix`, en profondeur. */
 const nodesKeyed = (node: TreeNode | null, prefix: string): Exclude<TreeNode, string>[] => {
   if (node === null || typeof node === 'string') return []
@@ -744,17 +823,19 @@ test('each agent row ends with a ghost copy button named after the agent', async
   const { view } = await open()
   // Le bouton de copie est la dernière boîte de chaque ligne, après le badge d'état.
   const rows = nodesKeyed(view.tree(), 'agent-')
-  assert.equal(rows.length, 5)
+  assert.equal(rows.length, 7)
   for (const row of rows) {
+    const handle = row.key?.slice('agent-'.length)
     const lastTwo = (row.children ?? []).slice(-2).map((child) => (typeof child === 'string' ? child : child.key))
-    assert.deepEqual(lastTwo, [`state-${row.key?.slice('agent-'.length)}`, `copy-${row.key?.slice('agent-'.length)}`])
+    // Sans état connu, il n'y a pas de badge : le bouton suit directement le texte.
+    assert.deepEqual(lastTwo, [handle === SILENT_AGENT.handle ? `text-${handle}` : `state-${handle}`, `copy-${handle}`])
   }
   const reviewer = copyButton(view, 'Reviewer')
   assert.equal(reviewer?.props.icon, 'copy')
   assert.equal(reviewer?.props.variant, 'ghost')
   assert.equal(reviewer?.props.tooltip, EN.copyHandleTooltip('term_claude'))
-  const names = ['Reviewer', 'Builder', 'Grok', 'Docs', 'Scratch']
-  assert.equal(names.filter((name) => copyButton(view, name)?.props.icon === 'copy').length, 5)
+  const names = ['Reviewer', 'Builder', 'Grok', 'Docs', 'Scratch', REMOTE_AGENT.title, SILENT_AGENT.title]
+  assert.equal(names.filter((name) => copyButton(view, name)?.props.icon === 'copy').length, 7)
   await expectClean(view)
 })
 

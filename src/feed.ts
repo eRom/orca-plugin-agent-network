@@ -3,7 +3,14 @@ import { OrcaCliError, type OrcaRunner } from './orca-cli'
 import { canonicalAgentId } from './icons'
 
 /** Un élément de `result.terminals` d'`orca terminal list --json`. */
-export type CliTerminal = { handle: string; title?: string; agentIdentity?: string }
+export type CliTerminal = {
+  handle: string
+  title?: string
+  agentIdentity?: string
+  worktreeId?: string
+  worktreePath?: string
+  orphaned?: boolean
+}
 
 /** Un élément de `result.messages` d'`orca orchestration inbox --full --json`. */
 export type CliMessage = {
@@ -92,7 +99,7 @@ export function buildFeed(
 const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object'
 
 /** Extrait un tableau d'un champ de la réponse du CLI, ou signale une forme inattendue. */
-function listField<T>(payload: unknown, field: string): T[] {
+export function listField<T>(payload: unknown, field: string): T[] {
   if (isRecord(payload) && Array.isArray(payload[field])) return payload[field] as T[]
   throw new OrcaCliError('bad_json', `orca answered without a "${field}" list`)
 }

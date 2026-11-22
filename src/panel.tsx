@@ -7,7 +7,6 @@ import {
   Button,
   Callout,
   Collapsible,
-  EmptyState,
   env,
   IconButton,
   Image,
@@ -30,7 +29,7 @@ import { harnessName, harnessShortName, messagesFor, shortHandle, type Messages 
 import type { FeedItem } from './feed'
 import { agentIcon } from './icons'
 import type { InstallReport, TargetState, UninstallReport } from './installer'
-import type { AgentState, AgentsView, FeedResult, StatusResult } from './protocol'
+import type { AgentRow, AgentState, AgentsView, FeedResult, StatusResult } from './protocol'
 
 /** Relève du fil tant que le panneau est visible. */
 export const FEED_POLL_MS = 5000
@@ -47,7 +46,7 @@ type Feedback =
   | { kind: 'uninstall'; report: UninstallReport }
   | { kind: 'error'; message: string }
 
-/** Les agents du workspace actif ; null tant que le worker n'a pas répondu. */
+/** Les agents de tous les workspaces, groupés ; null tant que le worker n'a pas répondu. */
 const agentsView = atom<AgentsView | null>(null)
 /** Pourquoi la lecture des agents a échoué (le worker injoignable), le cas échéant. */
 const agentsFailure = atom<string | null>(null)
@@ -189,13 +188,13 @@ export function setup(ctx: PanelContext): void {
         allReload.schedule()
         return
       }
-      // Un autre workspace : on ne montre pas, même un instant, les agents et le fil du précédent.
+      // Un autre workspace : on ne montre pas, même un instant, le fil du précédent. La liste des agents, elle, couvre tous
+      // les workspaces : elle reste affichée, seule la mise en évidence se déplace à la relecture.
       lastWorkspaceId = workspaceId
       // La relecture groupée du workspace précédent n'a plus lieu d'être : `loadAll` va la remplacer.
       allReload.cancel()
       agentsReload.cancel()
       feedReload.cancel()
-      set(agentsView, null)
       set(feedResult, null)
       set(agentsFailure, null)
       resetCopyState()
@@ -327,17 +326,12 @@ function renderRuled(rows: { key: string; node: OrcaNode }[]) {
   return <Stack gap="none">{rows.flatMap((row, index) => (index === 0 ? [row.node] : [<Separator key={`rule-${row.key}`} />, row.node]))}</Stack>
 }
 
-/** Titre de la section : son nom, un complément atténué, et à droite ce que l'appelant y met. */
-function renderSectionHeader(title: string, hint: string | null, trailing: OrcaNode = null) {
+/** Titre de la section, et à droite ce que l'appelant y met. */
+function renderSectionHeader(title: string, trailing: OrcaNode = null) {
   return (
     <Row justify="between" align="center" gap="sm">
       <Box key={`title-${title}`} direction="row" align="center" gap="sm" grow minWidth={0}>
         <Text weight="semibold">{title}</Text>
-        {hint === null ? null : (
-          <Text muted size="xs" truncate>
-            {hint}
-          </Text>
-        )}
       </Box>
       {trailing === null ? null : (
         <Box key={`trailing-${title}`} shrink={false}>
@@ -348,9 +342,11 @@ function renderSectionHeader(title: string, hint: string | null, trailing: OrcaN
   )
 }
 
-function renderAgentRow(m: Messages, agent: AgentsView['agents'][number], copied: boolean) {
+function renderAgentRow(m: Messages, agent: AgentRow, copied: boolean) {
   const harness = agent.agent === null ? null : harnessName(agent.agent)
   const name = agent.title ?? harness ?? m.unnamedAgent
+  // Sans titre, le nom est déjà le harnais : la seconde ligne ne le répète pas.
+  const harnessHint = agent.title !== null ? harness : null
   return (
     <Box key={`agent-${agent.handle}`} direction="row" align="center" gap="sm" paddingY="sm">
       {renderLead(agent.handle, name, agent.agent)}
@@ -358,14 +354,20 @@ function renderAgentRow(m: Messages, agent: AgentsView['agents'][number], copied
         <Text weight={agent.state === 'blocked' ? 'semibold' : 'medium'} truncate>
           {name}
         </Text>
-        <Text muted size="xs" truncate>
-          {agent.title !== null && harness !== null ? `${harness} · ` : ''}
-          <RelativeTime at={agent.since} format="short" />
-        </Text>
+        {harnessHint === null && agent.since === null ? null : (
+          <Text muted size="xs" truncate>
+            {harnessHint}
+            {harnessHint !== null && agent.since !== null ? ' · ' : null}
+            {agent.since === null ? null : <RelativeTime at={agent.since} format="short" />}
+          </Text>
+        )}
       </Box>
-      <Box key={`state-${agent.handle}`} shrink={false}>
-        <Badge tone={AGENT_STATE_TONE[agent.state]}>{m.agentStates[agent.state]}</Badge>
-      </Box>
+      {/* Un agent d'un autre workspace dont Orca n'a encore rien rapporté n'a pas d'état : pas de pastille plutôt qu'une invention. */}
+      {agent.state === null ? null : (
+        <Box key={`state-${agent.handle}`} shrink={false}>
+          <Badge tone={AGENT_STATE_TONE[agent.state]}>{m.agentStates[agent.state]}</Badge>
+        </Box>
+      )}
       {/* Même variante et même taille que Actualiser, en tête de section : les icônes forment une colonne. */}
       <Box key={`copy-${agent.handle}`} shrink={false}>
         <IconButton
@@ -404,6 +406,27 @@ function renderCopyFailure(message: string) {
   )
 }
 
+/**
+ * Un workspace : son nom en tête, puis ses agents en lignes à filet. Le groupe du workspace affiché est posé sur la surface
+ * `muted` ; tous les groupes ont le même retrait, pour que les lignes restent alignées d'un groupe à l'autre.
+ */
+function renderAgentGroup(m: Messages, group: AgentsView['groups'][number], copied: string | null) {
+  return (
+    <Box key={`group-${group.id}`} gap="xs" paddingX="sm" paddingY="sm" radius="md" background={group.current ? 'muted' : 'none'}>
+      <Text key={`group-name-${group.id}`} size="xs" weight="semibold" muted={!group.current} truncate>
+        {group.name}
+      </Text>
+      {group.agents.length === 0 ? (
+        <Text key={`group-empty-${group.id}`} muted size="xs">
+          {m.noAgents}
+        </Text>
+      ) : (
+        renderRuled(group.agents.map((agent) => ({ key: agent.handle, node: renderAgentRow(m, agent, agent.handle === copied) })))
+      )}
+    </Box>
+  )
+}
+
 function renderAgentsSection(m: Messages) {
   const view = read(agentsView)
   const failure = read(agentsFailure)
@@ -425,11 +448,11 @@ function renderAgentsSection(m: Messages) {
           </Row>
         </Stack>
       )
-  } else if (view.agents.length === 0) {
+  } else if (view.groups.length === 0) {
     body = (
       <Stack gap="xs">
         <Text muted size="xs">
-          {m.noAgents}
+          {m.noAgentsAnywhere}
         </Text>
         {failure === null ? null : renderAgentsStale(m)}
       </Stack>
@@ -437,7 +460,9 @@ function renderAgentsSection(m: Messages) {
   } else {
     body = (
       <Stack gap="xs">
-        {renderRuled(view.agents.map((agent) => ({ key: agent.handle, node: renderAgentRow(m, agent, agent.handle === copied) })))}
+        <Stack key="groups-list" gap="xs">
+          {view.groups.map((group) => renderAgentGroup(m, group, copied))}
+        </Stack>
         {failure === null ? null : renderAgentsStale(m)}
         {copyError === null ? null : renderCopyFailure(copyError)}
       </Stack>
@@ -445,7 +470,7 @@ function renderAgentsSection(m: Messages) {
   }
   return (
     <Stack gap="sm">
-      {renderSectionHeader(m.sectionAgents, view?.workspace?.name ?? null, refresh)}
+      {renderSectionHeader(m.sectionAgents, refresh)}
       {body}
     </Stack>
   )
@@ -722,16 +747,6 @@ function renderInstructionsSection(m: Messages) {
 
 export default function Panel() {
   const m = copy()
-  const view = read(agentsView)
-  // Sans workspace, ni agents ni fil : un seul état vide les remplace. Les consignes, elles, n'en dépendent pas.
-  if (view !== null && view.workspace === null) {
-    return (
-      <Stack gap="lg">
-        <EmptyState icon="folder" title={m.noWorkspace} />
-        {renderInstructionsSection(m)}
-      </Stack>
-    )
-  }
   return (
     <Stack gap="lg">
       {renderAgentsSection(m)}
