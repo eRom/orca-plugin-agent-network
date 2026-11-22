@@ -8,7 +8,7 @@ import { MESSAGES } from './copy'
 import { nodeFileSystem, type FileSystem } from './installer'
 import { OrcaCliError, type OrcaRunner } from './orca-cli'
 import { skillFile, skillTargets } from './targets'
-import { activateWith, LEDGER_BACKUP_KEY, LEDGER_KEY, LOCALE_KEY, type WorkerDeps } from './worker'
+import { activateWith, LEDGER_BACKUP_KEY, LEDGER_KEY, LOCALE_KEY, STATE_CACHE_KEY, type WorkerDeps } from './worker'
 
 const SKILL = '---\nname: agent-network\n---\nTest skill\n'
 
@@ -205,6 +205,99 @@ test('network.agents keeps the focused group, empty, when the workspace has no a
   const nothing = await mount(hostWith({ 'agents.list': { agents: [] } }), await makeDeps())
   assert.deepEqual(await nothing.request('network.agents'), { groups: [{ id: WORKSPACE_ID, name: 'My workspace', current: true, agents: [] }] })
   await nothing.deactivate()
+})
+
+const cacheWrites = (host: ReturnType<typeof mockHost>) =>
+  host.callsOf('storage.set').filter((params) => (params as { key: string }).key === STATE_CACHE_KEY).length
+
+const EVENT = { workspaceId: 'wt-other', paneKey: 'tab:pane', receivedAt: 5000 }
+
+test('the state cache survives a worker restart on the same storage', async () => {
+  const host = hostWith(FOCUSED_HOST)
+  const first = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
+  await first.emit('agent.status.changed', { ...EVENT, terminalId: 't3', state: 'blocked', mainAgent: { state: 'blocked', stateStartedAt: 4000 } })
+  assert.deepEqual(host.data().storage[STATE_CACHE_KEY], { t3: { state: 'blocked', since: 4000 } })
+  await first.deactivate()
+
+  // Un worker neuf (le précédent a été arrêté pour inactivité) reprend l'état sans nouvel événement.
+  const second = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
+  const view = await second.request('network.agents')
+  assert.deepEqual(view.groups.find((group) => group.id === 'wt-other')?.agents, [
+    { handle: 't3', agent: 'dsh', title: 'Deep thinker', state: 'blocked', since: 4000 }
+  ])
+  await second.deactivate()
+})
+
+test('the state read from agents.list is stored too, and a closed terminal is dropped from the stored cache', async () => {
+  let terminals = ALL_TERMINALS
+  const runOrca: OrcaRunner = async (args) => (args[0] === 'terminal' ? { terminals } : { messages: [] })
+  const host = hostWith(FOCUSED_HOST)
+  const worker = await mount(host, await makeDeps({ runOrca }))
+  await worker.request('network.agents')
+  assert.deepEqual(host.data().storage[STATE_CACHE_KEY], {
+    t1: { state: 'working', since: 1000, title: 'Fix parser' },
+    t2: { state: 'blocked', since: 2000 }
+  })
+  terminals = ALL_TERMINALS.filter((entry) => entry.handle !== 't2')
+  await worker.request('network.agents')
+  assert.deepEqual(Object.keys(host.data().storage[STATE_CACHE_KEY] as object), ['t1'])
+  await worker.deactivate()
+})
+
+test('an invalid stored state cache is ignored, logged, and replaced by the next write', async () => {
+  const invalid: unknown[] = [
+    'garbage',
+    [],
+    { t3: { state: 'sleeping', since: 1 } },
+    { t3: { state: 'done', since: 'yesterday' } },
+    { t3: { state: 'done', since: 1, title: 42 } },
+    { t3: null }
+  ]
+  for (const stored of invalid) {
+    const host = mockHost({ storage: { [STATE_CACHE_KEY]: stored as never }, results: FOCUSED_HOST })
+    const worker = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
+    const view = await worker.request('network.agents')
+    assert.equal(view.groups.find((group) => group.id === 'wt-other')?.agents[0]?.state, null, JSON.stringify(stored))
+    assert.ok(worker.logs.some((line) => line.startsWith('agents state cache invalid')), worker.logs.join('|'))
+    // L'écriture suivante remplace la valeur illisible par un cache valide.
+    assert.deepEqual(Object.keys(host.data().storage[STATE_CACHE_KEY] as object), ['t1', 't2'])
+    await worker.deactivate()
+  }
+})
+
+test('nothing is written to storage when the state cache did not change', async () => {
+  const host = hostWith(FOCUSED_HOST)
+  const worker = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
+  assert.equal(cacheWrites(host), 0, 'nothing at activation')
+  await worker.request('network.agents')
+  assert.equal(cacheWrites(host), 1)
+  await worker.request('network.agents')
+  await worker.request('network.agents')
+  assert.equal(cacheWrites(host), 1, 'same agents, same cache')
+
+  const event = { ...EVENT, terminalId: 't3', state: 'done' as const }
+  await worker.emit('agent.status.changed', event)
+  assert.equal(cacheWrites(host), 2)
+  await worker.emit('agent.status.changed', event)
+  assert.equal(cacheWrites(host), 2, 'the same event again')
+  await worker.emit('agent.status.changed', { ...EVENT, state: 'done' })
+  assert.equal(cacheWrites(host), 2, 'an event without terminal')
+  await worker.deactivate()
+
+  // Un worker neuf qui relit le même cache ne le réécrit pas.
+  const second = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
+  await second.request('network.agents')
+  assert.equal(cacheWrites(host), 2)
+  await second.deactivate()
+})
+
+test('a burst of events leaves the newest state in storage, whatever the write order', async () => {
+  const host = hostWith(FOCUSED_HOST)
+  const worker = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
+  const states = ['working', 'blocked', 'waiting', 'done'] as const
+  await Promise.all(states.map((state, index) => worker.emit('agent.status.changed', { ...EVENT, terminalId: 't3', state, receivedAt: 100 + index })))
+  assert.deepEqual(host.data().storage[STATE_CACHE_KEY], { t3: { state: 'done', since: 103 } })
+  await worker.deactivate()
 })
 
 test('network.agents shows the other workspaces, none highlighted, when no workspace is focused', async () => {

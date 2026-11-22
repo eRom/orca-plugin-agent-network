@@ -408,18 +408,24 @@ function renderCopyFailure(message: string) {
 
 /**
  * Un workspace : son nom en tête, puis ses agents en lignes à filet. Le groupe du workspace affiché est posé sur la surface
- * `muted` ; tous les groupes ont le même retrait, pour que les lignes restent alignées d'un groupe à l'autre.
+ * `card` (la surface `muted` est celle du badge neutre : sa pastille s'y perd) ; tous les groupes ont le même retrait, pour que les
+ * lignes restent alignées d'un groupe à l'autre. Le bloc n'a pas de marge verticale : le nom a le même `paddingY` qu'une ligne,
+ * donc l'espace au-dessus du nom égale celui sous la dernière ligne (le `paddingY` du bloc s'y ajouterait, côté bas seulement).
  */
 function renderAgentGroup(m: Messages, group: AgentsView['groups'][number], copied: string | null) {
   return (
-    <Box key={`group-${group.id}`} gap="xs" paddingX="sm" paddingY="sm" radius="md" background={group.current ? 'muted' : 'none'}>
-      <Text key={`group-name-${group.id}`} size="xs" weight="semibold" muted={!group.current} truncate>
-        {group.name}
-      </Text>
-      {group.agents.length === 0 ? (
-        <Text key={`group-empty-${group.id}`} muted size="xs">
-          {m.noAgents}
+    <Box key={`group-${group.id}`} paddingX="sm" radius="md" background={group.current ? 'card' : 'none'}>
+      <Box key={`group-header-${group.id}`} paddingY="sm">
+        <Text size="xs" weight="semibold" muted={!group.current} truncate>
+          {group.name}
         </Text>
+      </Box>
+      {group.agents.length === 0 ? (
+        <Box key={`group-empty-${group.id}`} paddingY="sm">
+          <Text muted size="xs">
+            {m.noAgents}
+          </Text>
+        </Box>
       ) : (
         renderRuled(group.agents.map((agent) => ({ key: agent.handle, node: renderAgentRow(m, agent, agent.handle === copied) })))
       )}

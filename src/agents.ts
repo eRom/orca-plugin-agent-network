@@ -96,3 +96,20 @@ export function buildAgentGroups({ terminals, focused, cache, floatingLabel }: A
   groups.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
   return { groups }
 }
+
+const AGENT_STATES: readonly string[] = ['working', 'blocked', 'waiting', 'done']
+
+/** Cache relu depuis un stockage non fiable : une seule entrée de forme inattendue invalide l'ensemble (`null`). */
+export function parseStateCache(raw: unknown): Map<string, AgentStateEntry> | null {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const cache = new Map<string, AgentStateEntry>()
+  for (const [handle, entry] of Object.entries(raw)) {
+    if (entry === null || typeof entry !== 'object') return null
+    const { state, since, title } = entry as Record<string, unknown>
+    if (typeof state !== 'string' || !AGENT_STATES.includes(state)) return null
+    if (typeof since !== 'number' || !Number.isFinite(since)) return null
+    if (title !== undefined && typeof title !== 'string') return null
+    cache.set(handle, { state: state as AgentState, since, ...(title === undefined ? {} : { title }) })
+  }
+  return cache
+}

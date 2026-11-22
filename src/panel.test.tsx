@@ -156,12 +156,12 @@ const nodesWhere = (node: TreeNode | null, matches: (node: Exclude<TreeNode, str
   return (matches(node) ? [node] : []).concat((node.children ?? []).flatMap((child) => nodesWhere(child, matches)))
 }
 
-/** Identifiants des groupes d'agents mis en évidence (fond `muted`) : le workspace affiché, normalement un seul. */
+/** Identifiants des groupes d'agents mis en évidence (fond `card`) : le workspace affiché, normalement un seul. */
 const currentGroupIds = (view: View): string[] =>
   [LIVE_AGENTS, OTHER_WORKSPACE_AGENTS]
     .flatMap((agents) => agents.groups.map((group) => group.id))
     .filter((id, index, ids) => ids.indexOf(id) === index)
-    .filter((id) => view.find({ testId: `group-${id}` })?.props.background === 'muted')
+    .filter((id) => view.find({ testId: `group-${id}` })?.props.background === 'card')
 
 // --- Agents -----------------------------------------------------------------------------------------------------
 
@@ -235,11 +235,11 @@ test('shows a blocked agent distinctly', async () => {
 
 test('draws flat rows separated by rules: no card, no border, no filled row', async () => {
   const { view } = await open({ status: () => ({ targets: ONE_TARGET_OF_EACH_STATE }) })
-  // Seuls les blocs de workspace sont arrondis, et seul celui du workspace affiché a un fond ; aucune ligne n'a de cadre.
+  // Seuls les blocs de workspace sont arrondis, et seul celui du workspace affiché a un fond (la surface `card`, car `muted` est celle du badge neutre) ; aucune ligne n'a de cadre.
   assert.equal(view.findAll({ type: 'Box' }).filter((box) => box.props.border !== undefined || box.props.radius === 'md').length, 0)
   const surfaces = nodesWhere(view.tree(), (node) => node.props?.radius === 'md' || node.props?.border !== undefined || node.props?.background === 'card')
   assert.deepEqual(surfaces.map((node) => node.key), ['group-wt-main', 'group-wt-other'])
-  assert.deepEqual(surfaces.map((node) => node.props?.background), ['muted', 'none'])
+  assert.deepEqual(surfaces.map((node) => node.props?.background), ['card', 'none'])
   // Cinq agents puis deux dans l'autre workspace, quatre messages et six cibles : un filet entre deux lignes d'une même liste, pas autour.
   assert.equal(view.findAll({ type: 'Separator' }).length, 4 + 1 + 3 + 5)
   await expectClean(view)
