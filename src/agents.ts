@@ -1,19 +1,19 @@
-// Assemble les agents de tous les workspaces en groupes, à partir du CLI `orca` (terminaux), de l'état connu par le worker
-// et des agents du workspace affiché. Module pur : aucun appel à l'hôte, le worker n'y met que ses lectures.
+// Assemble les agents de tous les workspaces en groupes, à partir du CLI `orca` (terminaux) et des réponses d'`agents.list`
+// par workspace. Module pur : aucun appel à l'hôte, le worker n'y met que ses lectures.
 import type { CliTerminal } from './feed'
 import { canonicalAgentId } from './icons'
-import type { AgentRow, AgentsView, AgentState } from './protocol'
+import type { AgentRow, AgentsView } from './protocol'
 
-/** Dernier état rapporté pour un terminal (événement `agent.status.changed` ou `agents.list`). */
-export type AgentStateEntry = { state: AgentState; since: number; title?: string }
-
-/** Le workspace affiché : ses terminaux (`readContext`), ses agents (`agents.list`) et le nom que donne Orca. */
+/** Le workspace affiché : ses terminaux (`readContext`) et le nom que donne Orca. */
 export type FocusedWorkspace = {
   workspaceId: string | null
   displayName: string
   /** Handles des terminaux du workspace, tous types confondus : ils servent à retrouver son groupe dans le CLI. */
   handles: ReadonlySet<string>
-  /** Lignes déjà construites depuis `agents.list`, dans son ordre. */
+  /**
+   * Lignes d'`agents.list` sans argument, lues seulement quand le groupe du workspace n'a pas de réponse exacte
+   * (aucun groupe d'agent dans le CLI, CLI muet, appel par workspace refusé) ; vide sinon.
+   */
   rows: AgentRow[]
 }
 
@@ -21,14 +21,15 @@ export type AgentGroupsInput = {
   /** Terminaux du CLI de tous les workspaces ; `null` quand le CLI a échoué. */
   terminals: readonly CliTerminal[] | null
   focused: FocusedWorkspace | null
-  cache: ReadonlyMap<string, AgentStateEntry>
+  /** Réponse d'`agents.list` par groupe (clé de `agentGroupKeys`) ; `null` quand l'appel a été rejeté : le groupe se replie sur le CLI. */
+  answers: ReadonlyMap<string, AgentRow[] | null>
   /** Nom du groupe des terminaux sans dossier (le terminal flottant d'Orca). */
   floatingLabel: string
 }
 
 const lastSegment = (path: string): string => path.split(/[\\/]/).filter((part) => part !== '').pop() ?? ''
 
-/** Clé de regroupement d'un terminal : le workspace d'Orca, à défaut son dossier. */
+/** Clé de regroupement d'un terminal : le workspace d'Orca, à défaut son dossier. C'est aussi le `workspaceId` d'`agents.list`. */
 const groupKey = (terminal: CliTerminal): string => terminal.worktreeId ?? terminal.worktreePath ?? ''
 
 /** Nom d'un groupe : le dossier du workspace, ou le libellé du terminal flottant quand il n'y en a pas. */
@@ -43,43 +44,60 @@ function groupName(terminals: readonly CliTerminal[], floatingLabel: string): st
 const isAgentTerminal = (terminal: CliTerminal): boolean =>
   typeof terminal.agentIdentity === 'string' && terminal.agentIdentity !== '' && terminal.orphaned !== true
 
-function otherRow(terminal: CliTerminal, cache: ReadonlyMap<string, AgentStateEntry>): AgentRow {
-  const known = cache.get(terminal.handle)
-  const cliTitle = typeof terminal.title === 'string' && terminal.title !== '' ? terminal.title : null
-  return {
-    handle: terminal.handle,
-    agent: canonicalAgentId(terminal.agentIdentity ?? null),
-    title: known?.title ?? cliTitle,
-    state: known?.state ?? null,
-    since: known?.since ?? null
-  }
-}
-
-/**
- * Un groupe par workspace qui a des agents, triés par nom. Celui du workspace affiché vient de `agents.list` (état exact) et
- * reste présent même vide ; les autres viennent du CLI, avec l'état que le worker a retenu (nul tant qu'il n'a rien vu).
- */
-export function buildAgentGroups({ terminals, focused, cache, floatingLabel }: AgentGroupsInput): AgentsView {
+function groupByKey(terminals: readonly CliTerminal[] | null): Map<string, CliTerminal[]> {
   const byKey = new Map<string, CliTerminal[]>()
   for (const terminal of terminals ?? []) {
     if (typeof terminal.handle !== 'string') continue
     byKey.set(groupKey(terminal), [...(byKey.get(groupKey(terminal)) ?? []), terminal])
   }
+  return byKey
+}
 
-  // Le groupe du workspace affiché : celui d'un de ses terminaux dans le CLI ; sinon (CLI muet, workspace sans terminal)
-  // on ne sait pas lequel c'est, et ses propres lignes suffisent.
-  let focusedKey: string | null = null
-  if (focused !== null) {
-    for (const [key, members] of byKey) {
-      if (members.some((terminal) => focused.handles.has(terminal.handle))) {
-        focusedKey = key
-        break
-      }
-    }
+/** Les workspaces qui ont au moins un terminal d'agent : ceux dont le worker demande les agents à l'hôte. */
+export function agentGroupKeys(terminals: readonly CliTerminal[]): string[] {
+  return [...groupByKey(terminals)].filter(([, members]) => members.some(isAgentTerminal)).map(([key]) => key)
+}
+
+/**
+ * Le groupe du workspace affiché : celui d'un de ses terminaux dans le CLI, tous types confondus. `null` quand on ne sait pas
+ * lequel c'est (CLI muet, workspace sans terminal).
+ */
+export function focusedGroupKey(terminals: readonly CliTerminal[], handles: ReadonlySet<string>): string | null {
+  for (const [key, members] of groupByKey(terminals)) {
+    if (members.some((terminal) => handles.has(terminal.handle))) return key
   }
+  return null
+}
+
+/** Ligne d'un terminal d'après le CLI seul : ni état ni durée, le panneau n'invente rien. */
+function cliRow(terminal: CliTerminal): AgentRow {
+  const title = typeof terminal.title === 'string' && terminal.title !== '' ? terminal.title : null
+  return { handle: terminal.handle, agent: canonicalAgentId(terminal.agentIdentity ?? null), title, state: null, since: null }
+}
+
+/**
+ * Un groupe par workspace qui a des agents, triés par nom. Les lignes d'un groupe viennent de la réponse d'`agents.list`
+ * pour ce workspace (état exact) ; sans réponse, de ses terminaux du CLI. Le groupe du workspace affiché reste présent même vide.
+ */
+export function buildAgentGroups({ terminals, focused, answers, floatingLabel }: AgentGroupsInput): AgentsView {
+  const byKey = groupByKey(terminals)
+  const focusedKey = focused === null || terminals === null ? null : focusedGroupKey(terminals, focused.handles)
 
   const groups: AgentsView['groups'] = []
-  if (focused !== null) {
+  for (const [key, members] of byKey) {
+    const agentTerminals = members.filter(isAgentTerminal)
+    if (agentTerminals.length === 0) continue
+    const current = key === focusedKey
+    const answer = answers.get(key) ?? null
+    // Sans réponse exacte, le workspace affiché garde les lignes d'`agents.list` sans argument si on en a lues, sinon le CLI.
+    const agents = answer ?? (current && focused !== null && focused.rows.length > 0 ? focused.rows : agentTerminals.map(cliRow))
+    // L'hôte ne connaît aucun agent pour ce workspace (terminal fantôme du CLI) : rien à montrer, sauf s'il est affiché.
+    if (agents.length === 0 && !current) continue
+    groups.push({ id: key, name: groupName(members, floatingLabel), current, agents })
+  }
+
+  // Le workspace affiché n'a aucun terminal d'agent dans le CLI : son groupe reste, pour dire où l'on est.
+  if (focused !== null && !groups.some((group) => group.current)) {
     groups.push({
       id: focusedKey ?? focused.workspaceId ?? 'focused',
       name: focusedKey === null ? focused.displayName : groupName(byKey.get(focusedKey) ?? [], floatingLabel),
@@ -87,29 +105,6 @@ export function buildAgentGroups({ terminals, focused, cache, floatingLabel }: A
       agents: focused.rows
     })
   }
-  for (const [key, members] of byKey) {
-    if (key === focusedKey) continue
-    const agents = members.filter(isAgentTerminal)
-    if (agents.length === 0) continue
-    groups.push({ id: key, name: groupName(members, floatingLabel), current: false, agents: agents.map((terminal) => otherRow(terminal, cache)) })
-  }
   groups.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
   return { groups }
-}
-
-const AGENT_STATES: readonly string[] = ['working', 'blocked', 'waiting', 'done']
-
-/** Cache relu depuis un stockage non fiable : une seule entrée de forme inattendue invalide l'ensemble (`null`). */
-export function parseStateCache(raw: unknown): Map<string, AgentStateEntry> | null {
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null
-  const cache = new Map<string, AgentStateEntry>()
-  for (const [handle, entry] of Object.entries(raw)) {
-    if (entry === null || typeof entry !== 'object') return null
-    const { state, since, title } = entry as Record<string, unknown>
-    if (typeof state !== 'string' || !AGENT_STATES.includes(state)) return null
-    if (typeof since !== 'number' || !Number.isFinite(since)) return null
-    if (title !== undefined && typeof title !== 'string') return null
-    cache.set(handle, { state: state as AgentState, since, ...(title === undefined ? {} : { title }) })
-  }
-  return cache
 }

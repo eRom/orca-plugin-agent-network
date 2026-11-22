@@ -32,7 +32,7 @@
     }
   ],
   "engines": {
-    "orca": ">=1.4.248"
+    "orca": ">=1.4.261"
   },
   "execution": "trusted-worker",
   "pluginApi": 1,
@@ -43,7 +43,6 @@
     { "kind": "storage:own" }
   ],
   "contributes": {
-    "events": [{ "on": "agent.status.changed" }],
     "panels": [
       { "id": "network", "title": "Network", "icon": "link", "entry": "src/panel.tsx", "ui": "components" }
     ],

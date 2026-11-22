@@ -236,7 +236,6 @@ test('shows a blocked agent distinctly', async () => {
 test('draws flat rows separated by rules: no card, no border, no filled row', async () => {
   const { view } = await open({ status: () => ({ targets: ONE_TARGET_OF_EACH_STATE }) })
   // Seuls les blocs de workspace sont arrondis, et seul celui du workspace affiché a un fond (la surface `muted`) ; aucune ligne n'a de cadre.
-  assert.equal(view.findAll({ type: 'Box' }).filter((box) => box.props.border !== undefined || box.props.radius === 'md').length, 0)
   const surfaces = nodesWhere(view.tree(), (node) => node.props?.radius === 'md' || node.props?.border !== undefined)
   assert.deepEqual(surfaces.map((node) => node.key), ['group-wt-main', 'group-wt-other'])
   assert.deepEqual(surfaces.map((node) => node.props?.background), ['muted', 'none'])

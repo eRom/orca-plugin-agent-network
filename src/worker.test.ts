@@ -8,7 +8,7 @@ import { MESSAGES } from './copy'
 import { nodeFileSystem, type FileSystem } from './installer'
 import { OrcaCliError, type OrcaRunner } from './orca-cli'
 import { skillFile, skillTargets } from './targets'
-import { activateWith, LEDGER_BACKUP_KEY, LEDGER_KEY, LOCALE_KEY, STATE_CACHE_KEY, type WorkerDeps } from './worker'
+import { activateWith, LEDGER_BACKUP_KEY, LEDGER_KEY, LOCALE_KEY, type WorkerDeps } from './worker'
 
 const SKILL = '---\nname: agent-network\n---\nTest skill\n'
 
@@ -51,6 +51,10 @@ const hostWith = (results: Record<string, unknown> = {}, storage?: Record<string
 
 const MAIN_PATH = '/Users/x/dev/agent-network'
 const OTHER_PATH = '/Users/x/dev/agent-progress-sp'
+/** Identifiants de workspace tels que les rend le CLI (`<uuid du dépôt>::<dossier>`) : ce sont eux que le worker passe à `agents.list`. */
+const MAIN_ID = `7d1c0e5a::${MAIN_PATH}`
+const OTHER_ID = `9b44f2c0::${OTHER_PATH}`
+const FLOATING_ID = 'global-floating-terminal'
 
 /** Un terminal tel que le rend `orca terminal list --json` : seuls les champs lus par le worker. */
 const cliTerminal = (handle: string, worktreeId: string, worktreePath: string, extra: Record<string, unknown> = {}) => ({
@@ -66,48 +70,71 @@ const cliWith =
   async (args) =>
     args[0] === 'terminal' ? { terminals } : { messages: [] }
 
-/** Le workspace affiché a les terminaux t1 et t2 ; `agents.list` en rend les agents (plus un fantôme sans terminal). */
-const FOCUSED_HOST = {
-  'workspace.readContext': { ...CONTEXT, terminals: [{ id: 't1' }, { id: 't2' }] },
-  'agents.list': {
-    agents: [
-      { terminalId: 't1', title: 'Fix parser', agent: 'codex', state: 'working', stateStartedAt: 1000 },
-      { terminalId: 't2', title: null, agent: null, state: 'blocked', stateStartedAt: 2000, sessionId: 's' },
-      { terminalId: null, title: 'ghost', agent: 'claude', state: 'done', stateStartedAt: 3000 }
-    ]
-  }
+/** Le groupe du workspace affiché plus un autre workspace (agent DeepSeek, un shell, un agent orphelin) et le terminal flottant. */
+const ALL_TERMINALS = [
+  cliTerminal('t1', MAIN_ID, MAIN_PATH, { agentIdentity: 'codex', title: 'CLI title t1' }),
+  cliTerminal('t2', MAIN_ID, MAIN_PATH, { agentIdentity: 'claude' }),
+  cliTerminal('t3', OTHER_ID, OTHER_PATH, { agentIdentity: 'dsh-tui', title: 'Deep thinker' }),
+  cliTerminal('t4', OTHER_ID, OTHER_PATH),
+  cliTerminal('t5', OTHER_ID, OTHER_PATH, { agentIdentity: 'grok', orphaned: true }),
+  cliTerminal('t6', FLOATING_ID, '', { agentIdentity: 'claude', title: 'Floating one' })
+]
+
+/** Ce que rend `agents.list` pour chaque workspace (plus un fantôme sans terminal dans le premier). */
+const MAIN_ANSWER = {
+  agents: [
+    { terminalId: 't1', title: 'Fix parser', agent: 'codex', state: 'working', stateStartedAt: 1000 },
+    { terminalId: 't2', title: null, agent: null, state: 'blocked', stateStartedAt: 2000, sessionId: 's' },
+    { terminalId: null, title: 'ghost', agent: 'claude', state: 'done', stateStartedAt: 3000 }
+  ]
 }
+const OTHER_ANSWER = { agents: [{ terminalId: 't3', title: 'Deepseek', agent: 'dsh-tui', state: 'waiting', stateStartedAt: 7000 }] }
 
 const MAIN_ROWS = [
   { handle: 't1', agent: 'codex', title: 'Fix parser', state: 'working', since: 1000 },
   { handle: 't2', agent: null, title: null, state: 'blocked', since: 2000 }
 ]
+const OTHER_ROWS = [{ handle: 't3', agent: 'dsh-tui', title: 'Deepseek', state: 'waiting', since: 7000 }]
+const FLOATING_ROWS = [{ handle: 't6', agent: 'claude', title: 'Floating one', state: null, since: null }]
 
-/** Le groupe du workspace affiché plus un autre workspace (agent DeepSeek, un shell, un agent orphelin) et le terminal flottant. */
-const ALL_TERMINALS = [
-  cliTerminal('t1', 'wt-main', MAIN_PATH, { agentIdentity: 'codex', title: 'stale CLI title' }),
-  cliTerminal('t2', 'wt-main', MAIN_PATH, { agentIdentity: 'claude' }),
-  cliTerminal('t3', 'wt-other', OTHER_PATH, { agentIdentity: 'dsh-tui', title: 'Deep thinker' }),
-  cliTerminal('t4', 'wt-other', OTHER_PATH),
-  cliTerminal('t5', 'wt-other', OTHER_PATH, { agentIdentity: 'grok', orphaned: true }),
-  cliTerminal('t6', 'global-floating-terminal', '', { agentIdentity: 'claude' })
-]
+type ListParams = { workspaceId?: string } | undefined
 
-test('network.agents groups the agents of every workspace, the focused group built from agents.list', async () => {
-  const worker = await mount(hostWith(FOCUSED_HOST), await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
+/**
+ * `agents.list` comme l'hôte 1.10 : sans `workspaceId` le workspace affiché, sinon celui que nomme l'identifiant
+ * (rejeté quand aucun workspace ne le porte, comme le terminal flottant).
+ */
+const agentsList = (byWorkspace: Record<string, unknown>, focused: unknown = { agents: [] }) => (params: ListParams) => {
+  if (params?.workspaceId === undefined) return focused
+  const answer = byWorkspace[params.workspaceId]
+  if (answer === undefined) throw hostError('not_found', `no workspace ${params.workspaceId}`)
+  return answer
+}
+
+const BY_WORKSPACE = { [MAIN_ID]: MAIN_ANSWER, [OTHER_ID]: OTHER_ANSWER }
+
+/** Le workspace affiché est MAIN : ses terminaux sont t1 et t2. */
+const focusedHost = (overrides: Record<string, unknown> = {}) =>
+  hostWith({
+    'workspace.readContext': { ...CONTEXT, terminals: [{ id: 't1' }, { id: 't2' }] },
+    'agents.list': agentsList(BY_WORKSPACE, MAIN_ANSWER),
+    ...overrides
+  })
+
+const listCalls = (host: ReturnType<typeof mockHost>) => host.callsOf('agents.list') as ListParams[]
+
+test('network.agents asks the host for each workspace with an agent, with the CLI workspace id, and groups the answers', async () => {
+  const host = focusedHost()
+  const worker = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
   assert.deepEqual(await worker.request('network.agents'), {
     groups: [
-      { id: 'wt-main', name: 'agent-network', current: true, agents: MAIN_ROWS },
-      // Un autre workspace : l'identité du harnais est canonique, le titre vient du CLI, l'état est inconnu ; ni shell ni orphelin.
-      {
-        id: 'wt-other',
-        name: 'agent-progress-sp',
-        current: false,
-        agents: [{ handle: 't3', agent: 'dsh', title: 'Deep thinker', state: null, since: null }]
-      },
-      { id: 'global-floating-terminal', name: 'Floating terminal', current: false, agents: [{ handle: 't6', agent: 'claude', title: null, state: null, since: null }] }
+      { id: MAIN_ID, name: 'agent-network', current: true, agents: MAIN_ROWS },
+      { id: OTHER_ID, name: 'agent-progress-sp', current: false, agents: OTHER_ROWS },
+      // Le terminal flottant n'est dans aucun workspace : l'hôte rejette, le groupe se replie sur le CLI, sans état.
+      { id: FLOATING_ID, name: 'Floating terminal', current: false, agents: FLOATING_ROWS }
     ]
   })
+  // Un appel par workspace qui a un agent, jamais pour un workspace qui n'a qu'un shell ; le groupe affiché est exact, pas d'appel sans argument.
+  assert.deepEqual(listCalls(host).map((params) => params?.workspaceId).sort(), [FLOATING_ID, MAIN_ID, OTHER_ID].sort())
   await worker.deactivate()
 })
 
@@ -117,64 +144,47 @@ test('network.agents asks the CLI for the terminals of all workspaces, never one
     calls.push(args)
     return { terminals: [] }
   }
-  const worker = await mount(hostWith(FOCUSED_HOST), await makeDeps({ runOrca }))
+  const worker = await mount(focusedHost(), await makeDeps({ runOrca }))
   await worker.request('network.agents')
   assert.deepEqual(calls, [['terminal', 'list', '--json']])
   await worker.deactivate()
 })
 
+test('a workspace the host rejects falls back to its CLI rows without state, the others keep their exact state', async () => {
+  const host = focusedHost({ 'agents.list': agentsList({ [MAIN_ID]: MAIN_ANSWER }, MAIN_ANSWER) })
+  const worker = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
+  const view = await worker.request('network.agents')
+  const byId = Object.fromEntries(view.groups.map((group) => [group.id, group]))
+  assert.deepEqual(byId[MAIN_ID]?.agents, MAIN_ROWS)
+  // Le CLI donne l'identité canonique du harnais et son titre ; ni état ni durée.
+  assert.deepEqual(byId[OTHER_ID]?.agents, [{ handle: 't3', agent: 'dsh', title: 'Deep thinker', state: null, since: null }])
+  assert.deepEqual(byId[FLOATING_ID]?.agents, FLOATING_ROWS)
+  await worker.deactivate()
+})
+
+test('a failing workspace is logged once, however many times the panel reloads', async () => {
+  const host = focusedHost()
+  const worker = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
+  await worker.request('network.agents')
+  await worker.request('network.agents')
+  assert.equal(worker.logs.filter((line) => line.startsWith(`agents list failed for ${FLOATING_ID}`)).length, 1, worker.logs.join('|'))
+  await worker.deactivate()
+})
+
 test('network.agents names the floating terminal group in the announced language', async () => {
-  const worker = await mount(hostWith(FOCUSED_HOST), await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
+  const worker = await mount(focusedHost(), await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
   await worker.request('locale.set', { locale: 'fr-FR' })
   const view = await worker.request('network.agents')
   assert.deepEqual(view.groups.map((group) => group.name), ['agent-network', 'agent-progress-sp', MESSAGES.fr.floatingTerminal])
   await worker.deactivate()
 })
 
-test('network.agents learns the state of other workspaces from agent.status.changed', async () => {
-  const worker = await mount(hostWith(FOCUSED_HOST), await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
-  const rowOf = async (handle: string) => {
-    const view = await worker.request('network.agents')
-    return view.groups.flatMap((group) => group.agents).find((row) => row.handle === handle)
-  }
-  const base = { workspaceId: 'wt-other', paneKey: 'tab:pane', receivedAt: 5000 }
-  assert.deepEqual(await rowOf('t3'), { handle: 't3', agent: 'dsh', title: 'Deep thinker', state: null, since: null })
-
-  // `since` vient de `mainAgent.stateStartedAt`, le titre de l'événement l'emporte sur celui du CLI.
-  await worker.emit('agent.status.changed', {
-    ...base,
-    terminalId: 't3',
-    state: 'blocked',
-    title: 'Deepseek',
-    mainAgent: { state: 'blocked', stateStartedAt: 4000 }
-  })
-  assert.deepEqual(await rowOf('t3'), { handle: 't3', agent: 'dsh', title: 'Deepseek', state: 'blocked', since: 4000 })
-
-  // Sans `mainAgent`, l'instant de réception sert de départ ; sans titre, celui du CLI reste.
-  await worker.emit('agent.status.changed', { ...base, terminalId: 't3', state: 'done' })
-  assert.deepEqual(await rowOf('t3'), { handle: 't3', agent: 'dsh', title: 'Deep thinker', state: 'done', since: 5000 })
-
-  // Sans terminal, l'événement ne peut être rattaché à aucune ligne : ignoré.
-  await worker.emit('agent.status.changed', { ...base, state: 'working' })
-  assert.deepEqual((await rowOf('t6'))?.state, null)
-  await worker.deactivate()
-})
-
-test('network.agents keeps the last state of an agent once its workspace is no longer the focused one', async () => {
-  let focused = true
-  const host = hostWith({
-    'workspace.readContext': () => (focused ? FOCUSED_HOST['workspace.readContext'] : { ...CONTEXT, terminals: [{ id: 't3' }] }),
-    'agents.list': () => (focused ? FOCUSED_HOST['agents.list'] : { agents: [] })
-  })
+test('the focused group falls back to agents.list without argument when its own call is rejected', async () => {
+  const host = focusedHost({ 'agents.list': agentsList({ [OTHER_ID]: OTHER_ANSWER }, MAIN_ANSWER) })
   const worker = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
-  await worker.request('network.agents')
-  focused = false
   const view = await worker.request('network.agents')
-  const main = view.groups.find((group) => group.id === 'wt-main')
-  // Le workspace n'est plus affiché : ses lignes viennent du CLI, avec l'état relevé quand il l'était.
-  assert.equal(main?.current, false)
-  assert.deepEqual(main?.agents.find((row) => row.handle === 't1'), { handle: 't1', agent: 'codex', title: 'Fix parser', state: 'working', since: 1000 })
-  assert.equal(view.groups.find((group) => group.current)?.id, 'wt-other')
+  assert.deepEqual(view.groups.find((group) => group.current)?.agents, MAIN_ROWS)
+  assert.ok(listCalls(host).some((params) => params?.workspaceId === undefined), 'the focused workspace is read without argument')
   await worker.deactivate()
 })
 
@@ -182,135 +192,89 @@ test('network.agents answers with the focused group alone, and logs it, when the
   const runOrca: OrcaRunner = async () => {
     throw new OrcaCliError('timeout', 'raw detail')
   }
-  const worker = await mount(hostWith(FOCUSED_HOST), await makeDeps({ runOrca }))
+  const host = focusedHost()
+  const worker = await mount(host, await makeDeps({ runOrca }))
   assert.deepEqual(await worker.request('network.agents'), {
     groups: [{ id: WORKSPACE_ID, name: 'My workspace', current: true, agents: MAIN_ROWS }]
   })
   assert.ok(worker.logs.some((line) => line.startsWith('agents terminals failed code=timeout')), worker.logs.join('|'))
+  assert.deepEqual(listCalls(host).map((params) => params?.workspaceId), [undefined])
   await worker.deactivate()
 })
 
-test('network.agents keeps the focused group, empty, when the workspace has no agent', async () => {
-  // Un shell dans le workspace affiché donne son dossier ; sans aucun terminal connu, le nom d'affichage d'Orca prend le relais.
-  const withShell = await mount(
-    hostWith({ 'workspace.readContext': { ...CONTEXT, terminals: [{ id: 'sh' }] }, 'agents.list': { agents: [] } }),
-    await makeDeps({ runOrca: cliWith([cliTerminal('sh', 'wt-main', MAIN_PATH), ...ALL_TERMINALS.slice(2, 3)]) })
-  )
-  assert.deepEqual((await withShell.request('network.agents')).groups.map(({ id, name, current, agents }) => ({ id, name, current, count: agents.length })), [
-    { id: 'wt-main', name: 'agent-network', current: true, count: 0 },
-    { id: 'wt-other', name: 'agent-progress-sp', current: false, count: 1 }
-  ])
-  await withShell.deactivate()
-
-  const nothing = await mount(hostWith({ 'agents.list': { agents: [] } }), await makeDeps())
-  assert.deepEqual(await nothing.request('network.agents'), { groups: [{ id: WORKSPACE_ID, name: 'My workspace', current: true, agents: [] }] })
-  await nothing.deactivate()
-})
-
-const cacheWrites = (host: ReturnType<typeof mockHost>) =>
-  host.callsOf('storage.set').filter((params) => (params as { key: string }).key === STATE_CACHE_KEY).length
-
-const EVENT = { workspaceId: 'wt-other', paneKey: 'tab:pane', receivedAt: 5000 }
-
-test('the state cache survives a worker restart on the same storage', async () => {
-  const host = hostWith(FOCUSED_HOST)
-  const first = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
-  await first.emit('agent.status.changed', { ...EVENT, terminalId: 't3', state: 'blocked', mainAgent: { state: 'blocked', stateStartedAt: 4000 } })
-  assert.deepEqual(host.data().storage[STATE_CACHE_KEY], { t3: { state: 'blocked', since: 4000 } })
-  await first.deactivate()
-
-  // Un worker neuf (le précédent a été arrêté pour inactivité) reprend l'état sans nouvel événement.
-  const second = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
-  const view = await second.request('network.agents')
-  assert.deepEqual(view.groups.find((group) => group.id === 'wt-other')?.agents, [
-    { handle: 't3', agent: 'dsh', title: 'Deep thinker', state: 'blocked', since: 4000 }
-  ])
-  await second.deactivate()
-})
-
-test('the state read from agents.list is stored too, and a closed terminal is dropped from the stored cache', async () => {
-  let terminals = ALL_TERMINALS
-  const runOrca: OrcaRunner = async (args) => (args[0] === 'terminal' ? { terminals } : { messages: [] })
-  const host = hostWith(FOCUSED_HOST)
-  const worker = await mount(host, await makeDeps({ runOrca }))
-  await worker.request('network.agents')
-  assert.deepEqual(host.data().storage[STATE_CACHE_KEY], {
-    t1: { state: 'working', since: 1000, title: 'Fix parser' },
-    t2: { state: 'blocked', since: 2000 }
+test('network.agents keeps the groups, none highlighted, when readContext fails', async () => {
+  const host = focusedHost({
+    'workspace.readContext': () => {
+      throw hostError('unavailable', 'host busy')
+    }
   })
-  terminals = ALL_TERMINALS.filter((entry) => entry.handle !== 't2')
-  await worker.request('network.agents')
-  assert.deepEqual(Object.keys(host.data().storage[STATE_CACHE_KEY] as object), ['t1'])
-  await worker.deactivate()
-})
-
-test('an invalid stored state cache is ignored, logged, and replaced by the next write', async () => {
-  const invalid: unknown[] = [
-    'garbage',
-    [],
-    { t3: { state: 'sleeping', since: 1 } },
-    { t3: { state: 'done', since: 'yesterday' } },
-    { t3: { state: 'done', since: 1, title: 42 } },
-    { t3: null }
-  ]
-  for (const stored of invalid) {
-    const host = mockHost({ storage: { [STATE_CACHE_KEY]: stored as never }, results: FOCUSED_HOST })
-    const worker = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
-    const view = await worker.request('network.agents')
-    assert.equal(view.groups.find((group) => group.id === 'wt-other')?.agents[0]?.state, null, JSON.stringify(stored))
-    assert.ok(worker.logs.some((line) => line.startsWith('agents state cache invalid')), worker.logs.join('|'))
-    // L'écriture suivante remplace la valeur illisible par un cache valide.
-    assert.deepEqual(Object.keys(host.data().storage[STATE_CACHE_KEY] as object), ['t1', 't2'])
-    await worker.deactivate()
-  }
-})
-
-test('nothing is written to storage when the state cache did not change', async () => {
-  const host = hostWith(FOCUSED_HOST)
   const worker = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
-  assert.equal(cacheWrites(host), 0, 'nothing at activation')
-  await worker.request('network.agents')
-  assert.equal(cacheWrites(host), 1)
-  await worker.request('network.agents')
-  await worker.request('network.agents')
-  assert.equal(cacheWrites(host), 1, 'same agents, same cache')
-
-  const event = { ...EVENT, terminalId: 't3', state: 'done' as const }
-  await worker.emit('agent.status.changed', event)
-  assert.equal(cacheWrites(host), 2)
-  await worker.emit('agent.status.changed', event)
-  assert.equal(cacheWrites(host), 2, 'the same event again')
-  await worker.emit('agent.status.changed', { ...EVENT, state: 'done' })
-  assert.equal(cacheWrites(host), 2, 'an event without terminal')
-  await worker.deactivate()
-
-  // Un worker neuf qui relit le même cache ne le réécrit pas.
-  const second = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
-  await second.request('network.agents')
-  assert.equal(cacheWrites(host), 2)
-  await second.deactivate()
-})
-
-test('a burst of events leaves the newest state in storage, whatever the write order', async () => {
-  const host = hostWith(FOCUSED_HOST)
-  const worker = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
-  const states = ['working', 'blocked', 'waiting', 'done'] as const
-  await Promise.all(states.map((state, index) => worker.emit('agent.status.changed', { ...EVENT, terminalId: 't3', state, receivedAt: 100 + index })))
-  assert.deepEqual(host.data().storage[STATE_CACHE_KEY], { t3: { state: 'done', since: 103 } })
+  const view = await worker.request('network.agents')
+  assert.deepEqual(view.groups.map((group) => [group.id, group.current, group.agents.length]), [
+    [MAIN_ID, false, 2],
+    [OTHER_ID, false, 1],
+    [FLOATING_ID, false, 1]
+  ])
+  assert.ok(worker.logs.some((line) => line.startsWith('agents context failed')), worker.logs.join('|'))
+  assert.equal(listCalls(host).some((params) => params?.workspaceId === undefined), false, 'no focused workspace, no call without argument')
   await worker.deactivate()
 })
 
 test('network.agents shows the other workspaces, none highlighted, when no workspace is focused', async () => {
-  const host = hostWith({ 'workspace.readContext': null, 'agents.list': { agents: [] } })
+  const host = focusedHost({ 'workspace.readContext': null })
   const worker = await mount(host, await makeDeps({ runOrca: cliWith(ALL_TERMINALS) }))
   const view = await worker.request('network.agents')
   assert.deepEqual(view.groups.map((group) => [group.id, group.current]), [
-    ['wt-main', false],
-    ['wt-other', false],
-    ['global-floating-terminal', false]
+    [MAIN_ID, false],
+    [OTHER_ID, false],
+    [FLOATING_ID, false]
   ])
   await worker.deactivate()
 })
+
+test('network.agents answers with the empty view only when neither readContext nor the CLI could be read', async () => {
+  const host = focusedHost({
+    'workspace.readContext': () => {
+      throw hostError('unavailable', 'host busy')
+    }
+  })
+  const runOrca: OrcaRunner = async () => {
+    throw new OrcaCliError('spawn_failed', 'no binary')
+  }
+  const worker = await mount(host, await makeDeps({ runOrca }))
+  assert.deepEqual(await worker.request('network.agents'), { groups: [] })
+  await worker.deactivate()
+})
+
+test('network.agents keeps the focused group, empty, when the workspace has no agent terminal', async () => {
+  // Un shell dans le workspace affiché donne son dossier ; aucun appel par workspace pour lui, `agents.list` sans argument ne rend rien.
+  const host = focusedHost({
+    'workspace.readContext': { ...CONTEXT, terminals: [{ id: 'sh' }] },
+    'agents.list': agentsList(BY_WORKSPACE, { agents: [] })
+  })
+  const terminals = [cliTerminal('sh', MAIN_ID, MAIN_PATH), ALL_TERMINALS[2]]
+  const worker = await mount(host, await makeDeps({ runOrca: cliWith(terminals) }))
+  assert.deepEqual((await worker.request('network.agents')).groups.map(({ id, name, current, agents }) => ({ id, name, current, count: agents.length })), [
+    { id: MAIN_ID, name: 'agent-network', current: true, count: 0 },
+    { id: OTHER_ID, name: 'agent-progress-sp', current: false, count: 1 }
+  ])
+  assert.equal(listCalls(host).some((params) => params?.workspaceId === MAIN_ID), false, 'a shell-only workspace is not asked')
+  await worker.deactivate()
+
+  // Sans aucun terminal connu, le nom d'affichage d'Orca prend le relais.
+  const nothing = await mount(hostWith({ 'agents.list': agentsList({}) }), await makeDeps())
+  assert.deepEqual(await nothing.request('network.agents'), { groups: [{ id: WORKSPACE_ID, name: 'My workspace', current: true, agents: [] }] })
+  await nothing.deactivate()
+})
+
+test('network.agents lists the focused workspace agents read without argument when the CLI sees none of them', async () => {
+  const host = focusedHost({ 'workspace.readContext': { ...CONTEXT, terminals: [{ id: 'sh' }] } })
+  const worker = await mount(host, await makeDeps({ runOrca: cliWith([cliTerminal('sh', MAIN_ID, MAIN_PATH)]) }))
+  const view = await worker.request('network.agents')
+  assert.deepEqual(view.groups, [{ id: MAIN_ID, name: 'agent-network', current: true, agents: MAIN_ROWS }])
+  await worker.deactivate()
+})
+
 
 test('network.feed uses the focused workspace selector', async () => {
   const calls: (readonly string[])[] = []
@@ -639,28 +603,6 @@ test('network.feed answers with a localized error when readContext fails', async
   await worker.request('locale.set', { locale: 'fr' })
   assert.deepEqual(await worker.request('network.feed'), { error: MESSAGES.fr.feedFailed })
   await worker.deactivate()
-})
-
-test('network.agents answers with the empty view when a host call fails', async () => {
-  const failingList = hostWith({
-    'agents.list': () => {
-      throw hostError('unavailable', 'host busy')
-    }
-  })
-  const first = await mount(failingList, await makeDeps())
-  assert.deepEqual(await first.request('network.agents'), { groups: [] })
-  assert.ok(first.logs.some((line) => line.startsWith('agents failed')), first.logs.join('|'))
-  await first.deactivate()
-
-  const failingContext = hostWith({
-    'workspace.readContext': () => {
-      throw hostError('unavailable', 'host busy')
-    },
-    'agents.list': { agents: [] }
-  })
-  const second = await mount(failingContext, await makeDeps())
-  assert.deepEqual(await second.request('network.agents'), { groups: [] })
-  await second.deactivate()
 })
 
 test('palette counts say skills folders, singular and plural, in both languages', () => {

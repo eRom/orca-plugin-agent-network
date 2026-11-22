@@ -2,13 +2,13 @@
 
 **Let the coding agents of an Orca workspace talk to each other: "ask codex to review this" works from Claude Code, Codex, Grok, Antigravity, DeepSeek Harness, OpenCode, Pi and other harnesses.**
 
-![Orca](https://img.shields.io/badge/Orca-%E2%89%A51.4.248-blue) ![macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Orca](https://img.shields.io/badge/Orca-%E2%89%A51.4.261-blue) ![macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
 [Install](#install) · [Usage](#usage) · [Panel](#the-network-panel) · [Files](#what-it-writes) · [Uninstall](#uninstall) · [Access](#what-it-can-access) · [Limits](#requirements-and-limits) · [Development](#development)
 
 ![The Network panel listing five agents of different harnesses and their messages, beside a Claude Code prompt asking Codex for a review](media/cover.png)
 
-Orca already ships a mailbox for agents (`orca orchestration send`, `check`, `reply`). What agents lack is the habit of using it with each other. Agent Network adds the teammate instructions (a skill) to every harness you have, so any agent knows how to find its peers, send a self-contained request and answer one it receives. A **Network** panel shows who is on the network and what they said. There is no daemon of its own and no extra CLI: the agents use Orca's own mail.
+Orca already ships a mailbox for agents (`orca orchestration send`, `check`, `reply`). What agents lack is the habit of using it with each other. Agent Network adds the teammate instructions (a skill) to every harness you have, so any agent knows how to find its peers, send a self-contained request and answer one it receives. A **Network** panel shows who is on the network and what they said. There is no background service and no extra CLI: the agents use Orca's own mail.
 
 ## Install
 
@@ -35,7 +35,7 @@ The agent sends a message to the peer's terminal. The peer reads it, does the wo
 
 ## The Network panel
 
-- **Agents** of every workspace, grouped by workspace folder; the focused workspace's group is highlighted. Each agent shows its state (working, blocked, waiting, done), updated on Orca's agent status events. An agent of another workspace shows no state until Orca reports a change of state for it.
+- **Agents** of every workspace, grouped by workspace folder; the focused workspace's group is highlighted. Each agent shows its state (working, blocked, waiting, done), read from Orca for every workspace and refreshed on Orca's agent status events. Terminals outside any workspace (the floating terminal) are listed without a state.
 - **Copy ID** button on each agent row: copies the agent's terminal handle (`term_…`) to the clipboard, to paste it into a request to another agent, in this workspace or another.
 - **Messages**: the last 20 exchanged with a terminal of this workspace. They are read with `orca orchestration inbox`, never consumed, and refreshed every 5 seconds while the panel is visible.
 - **Install status per harness**, with Install and Remove buttons.
@@ -76,8 +76,8 @@ Orca labels this plugin **Full access** (`trusted-worker`): it runs its own work
 | Capability | Why |
 | --- | --- |
 | `workspace:read` | Know the focused workspace, to highlight its agents and list its messages. |
-| `agent:read` | Read the agents and their state, and be told when an agent's state changes in any workspace. |
-| `storage:own` | Keep the install record, the panel language and the last known state of each agent in the plugin's own storage. |
+| `agent:read` | Read the agents and their state. |
+| `storage:own` | Keep the install record and the panel language in the plugin's own storage. |
 
 Beyond Orca's API, the worker:
 
@@ -88,7 +88,7 @@ Beyond Orca's API, the worker:
 
 ## Requirements and limits
 
-- **Orca 1.4.248 or later**. macOS is the tested platform.
+- **Orca 1.4.261 or later**. macOS is the tested platform.
 - **Messages of the focused workspace only**: the panel lists the agents of every workspace, but the feed covers the focused one. Agents reach another workspace only through a handle (`term_…`) you give them, which **Copy ID** provides.
 - **Local agents only**: agents on a paired Orca server or a detached (orphaned) terminal are not listed.
 - **Agents need a permissive mode**. In an "ask" permission mode, each `send`, `check` or `reply` waits for your approval.

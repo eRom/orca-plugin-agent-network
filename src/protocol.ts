@@ -4,7 +4,7 @@ import type { InstallReport, TargetStatus, UninstallReport } from './installer'
 
 export type AgentState = 'working' | 'blocked' | 'waiting' | 'done'
 
-/** Un agent d'un terminal ; `state` et `since` sont nuls quand Orca n'a encore rien rapporté pour un autre workspace que le courant. */
+/** Un agent d'un terminal ; `state` et `since` sont nuls quand l'hôte n'a pas pu rendre les agents du workspace (le terminal flottant n'en est pas un), les lignes viennent alors du CLI. */
 export type AgentRow = { handle: string; agent: string | null; title: string | null; state: AgentState | null; since: number | null }
 
 /** Les agents de tous les workspaces, groupés par workspace ; le groupe du workspace affiché est `current`. */

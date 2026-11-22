@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import type { JsonValue, OrcaWorkerApi } from 'orca/worker'
-import { buildAgentGroups, parseStateCache, type AgentStateEntry } from './agents'
+import { agentGroupKeys, buildAgentGroups, focusedGroupKey, type FocusedWorkspace } from './agents'
 import { ClipboardUnavailableError, createClipboardWriter } from './clipboard'
 import { localeOf, LOCALES, MESSAGES, type InstallCounts, type Locale, type Messages, type UninstallCounts } from './copy'
 import { fetchFeed, listField, type CliTerminal } from './feed'
@@ -28,8 +28,6 @@ import { skillTargets } from './targets'
 export const LEDGER_KEY = 'skill.ledger'
 /** Clé de stockage de la dernière langue annoncée par un panneau. */
 export const LOCALE_KEY = 'locale'
-/** Clé de stockage du dernier état connu des agents, par terminal. */
-export const STATE_CACHE_KEY = 'agents.stateCache'
 /** Copie du registre quand il est illisible : fixe, jamais écrasée. */
 export const LEDGER_BACKUP_KEY = 'skill.ledger.corrupt'
 
@@ -225,64 +223,6 @@ export async function activateWith(orca: OrcaWorkerApi, deps: WorkerDeps): Promi
     return { ok: true as const }
   })
 
-  /**
-   * Dernier état connu par terminal, pour les agents des autres workspaces : `agents.list` ne rend que ceux du workspace affiché.
-   * Alimenté par `agent.status.changed` (tous workspaces) et par chaque lecture d'`agents.list`. Copié dans le stockage du
-   * plugin : Orca arrête un worker inactif après 5 minutes (PLUGIN_WORKER_IDLE_REAP_MS du source d'Orca), et la mémoire partirait avec lui.
-   */
-  const stateCache = new Map<string, AgentStateEntry>()
-  /** Contenu (sérialisé) du dernier état connu du stockage : sert à n'écrire que ce qui a changé. `null` : rien de valide stocké. */
-  let storedCache: string | null = null
-  /** Chaîne des écritures du cache : une écriture ne part qu'après le règlement de la précédente, et relit le cache à ce moment-là. */
-  let cacheWrites: Promise<unknown> = Promise.resolve()
-
-  /** Relit le cache stocké au démarrage ; une valeur illisible est ignorée (et journalisée), la prochaine écriture la remplacera. */
-  async function loadStateCache(): Promise<void> {
-    try {
-      const raw = await orca.storage.get(STATE_CACHE_KEY)
-      if (raw === null) return
-      const parsed = parseStateCache(raw)
-      if (parsed === null) {
-        orca.log('agents state cache invalid, ignored')
-        return
-      }
-      for (const [handle, entry] of parsed) stateCache.set(handle, entry)
-      storedCache = JSON.stringify(Object.fromEntries(stateCache))
-    } catch (error) {
-      orca.log(`agents state cache read failed: ${messageOf(error)}`)
-    }
-  }
-  const cacheLoaded = loadStateCache()
-
-  /** Écrit le cache dans le stockage s'il a changé depuis la dernière écriture ; ne lève jamais. */
-  function persistStateCache(): Promise<void> {
-    const write = cacheWrites.then(async () => {
-      const snapshot = JSON.stringify(Object.fromEntries(stateCache))
-      if (snapshot === storedCache) return
-      try {
-        await orca.storage.set(STATE_CACHE_KEY, Object.fromEntries(stateCache))
-        storedCache = snapshot
-      } catch (error) {
-        orca.log(`agents state cache write failed: ${messageOf(error)}`)
-      }
-    })
-    cacheWrites = write
-    return write
-  }
-
-  orca.events.on('agent.status.changed', async (event) => {
-    // Sans terminal, l'événement ne peut être rattaché à aucune ligne du panneau.
-    if (event.terminalId === undefined) return
-    // Le cache stocké ne doit pas écraser ce que cet événement vient d'apprendre.
-    await cacheLoaded
-    stateCache.set(event.terminalId, {
-      state: event.state,
-      since: event.mainAgent?.stateStartedAt ?? event.receivedAt,
-      ...(event.title === undefined ? {} : { title: event.title })
-    })
-    await persistStateCache()
-  })
-
   /** Terminaux de tous les workspaces d'après le CLI ; `null` (journalisé) quand il échoue : la vue se replie alors sur le workspace affiché. */
   async function readAllTerminals(): Promise<CliTerminal[] | null> {
     try {
@@ -293,40 +233,73 @@ export async function activateWith(orca: OrcaWorkerApi, deps: WorkerDeps): Promi
     }
   }
 
+  /** Contexte du workspace affiché ; `null` (journalisé s'il y a eu une erreur) quand il n'y en a pas ou qu'il est illisible. */
+  async function readFocusedContext() {
+    try {
+      return await orca.host.call('workspace.readContext', {})
+    } catch (error) {
+      orca.log(`agents context failed: ${messageOf(error)}`)
+      return null
+    }
+  }
+
+  /** `agents.list` du workspace affiché (sans `workspaceId`) ou de celui que nomme `workspaceId` (hôte 1.10 ; rejeté s'il ne le résout pas). */
+  const listAgents = (params: { workspaceId?: string }) => orca.host.call('agents.list', params)
+
+  /** Lignes d'une réponse d'`agents.list` : un agent sans terminal ne peut pas recevoir de message, il n'a pas d'adresse à afficher. */
+  const rowsOf = (agents: Awaited<ReturnType<typeof listAgents>>['agents']): AgentRow[] =>
+    agents.flatMap((agent) =>
+      agent.terminalId === null
+        ? []
+        : [{ handle: agent.terminalId, agent: agent.agent, title: agent.title, state: agent.state, since: agent.stateStartedAt }]
+    )
+
+  /** Groupes dont l'appel `agents.list` par workspace a déjà échoué : un échec durable (terminal flottant) n'est journalisé qu'une fois. */
+  const failedGroups = new Set<string>()
+
   orca.panels.handle('network.agents', async (): Promise<AgentsView> => {
     try {
-      const [context, { agents }, terminals] = await Promise.all([
-        orca.host.call('workspace.readContext', {}),
-        orca.host.call('agents.list', {}),
-        readAllTerminals(),
-        cacheLoaded
-      ])
-      // Un agent sans terminal ne peut pas recevoir de message : il n'a pas d'adresse à afficher.
-      const rows: AgentRow[] = []
-      for (const agent of agents) {
-        if (agent.terminalId === null) continue
-        rows.push({ handle: agent.terminalId, agent: agent.agent, title: agent.title, state: agent.state, since: agent.stateStartedAt })
-        stateCache.set(agent.terminalId, {
-          state: agent.state,
-          since: agent.stateStartedAt,
-          ...(agent.title === null ? {} : { title: agent.title })
-        })
-      }
-      // Un terminal fermé n'a plus de ligne : son état n'a plus de raison d'être retenu.
-      if (terminals !== null) {
-        const present = new Set(terminals.map((terminal) => terminal.handle))
-        for (const handle of stateCache.keys()) if (!present.has(handle)) stateCache.delete(handle)
-      }
-      await persistStateCache()
-      const handles = new Set([...(context?.terminals.map((terminal) => terminal.id) ?? []), ...rows.map((row) => row.handle)])
-      return buildAgentGroups({
-        terminals,
-        focused: context === null ? null : { workspaceId: context.workspaceId ?? null, displayName: context.displayName, handles, rows },
-        cache: stateCache,
-        floatingLabel: m().floatingTerminal
+      const [context, terminals] = await Promise.all([readFocusedContext(), readAllTerminals()])
+      // Ni le workspace affiché ni le CLI : rien à montrer. Un seul des deux suffit à dessiner quelque chose.
+      if (context === null && terminals === null) return { groups: [] }
+
+      // Un appel par workspace qui a un agent d'après le CLI : l'état exact de chacun, sans dépendre d'aucun événement.
+      const keys = terminals === null ? [] : agentGroupKeys(terminals)
+      const settled = await Promise.allSettled(keys.map((key) => listAgents({ workspaceId: key })))
+      const answers = new Map<string, AgentRow[] | null>()
+      settled.forEach((result, index) => {
+        const key = keys[index]!
+        if (result.status === 'fulfilled') {
+          failedGroups.delete(key)
+          answers.set(key, rowsOf(result.value.agents))
+          return
+        }
+        // Une adresse qu'Orca ne résout pas (le terminal flottant n'est dans aucun workspace) : les lignes du CLI, sans état.
+        answers.set(key, null)
+        if (!failedGroups.has(key)) orca.log(`agents list failed for ${key}: ${messageOf(result.reason)}`)
+        failedGroups.add(key)
       })
+
+      const handles = new Set(context?.terminals.map((terminal) => terminal.id) ?? [])
+      let focused: FocusedWorkspace | null = null
+      if (context !== null) {
+        // Sans réponse exacte pour son groupe (pas de groupe d'agent dans le CLI, CLI muet, appel refusé), le workspace affiché
+        // se lit comme avant : `agents.list` sans argument.
+        const focusedKey = terminals === null ? null : focusedGroupKey(terminals, handles)
+        const exact = focusedKey !== null && answers.get(focusedKey) != null
+        let rows: AgentRow[] = []
+        if (!exact) {
+          try {
+            rows = rowsOf((await listAgents({})).agents)
+          } catch (error) {
+            orca.log(`agents focused list failed: ${messageOf(error)}`)
+          }
+        }
+        focused = { workspaceId: context.workspaceId ?? null, displayName: context.displayName, handles, rows }
+      }
+      return buildAgentGroups({ terminals, focused, answers, floatingLabel: m().floatingTerminal })
     } catch (error) {
-      // Une erreur de l'hôte ne doit pas faire rejeter la requête : le panneau montre l'état vide.
+      // Une erreur inattendue ne doit pas faire rejeter la requête : le panneau montre l'état vide.
       orca.log(`agents failed: ${messageOf(error)}`)
       return { groups: [] }
     }
@@ -405,5 +378,5 @@ export async function activateWith(orca: OrcaWorkerApi, deps: WorkerDeps): Promi
     }
   })
 
-  await Promise.all([ready, cacheLoaded])
+  await ready
 }
