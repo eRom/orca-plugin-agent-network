@@ -35,8 +35,8 @@ The agent sends a message to the peer's terminal. The peer reads it, does the wo
 
 ## The Network panel
 
-- **Agents** of the focused workspace and their state (working, blocked, waiting, done), updated on Orca's agent status events.
-- **Copy ID** button on each agent row: copies the agent's terminal handle (`term_…`) to the clipboard, to paste it into a request to another agent.
+- **Agents** of every workspace, grouped by workspace folder; the focused workspace's group is highlighted. Each agent shows its state (working, blocked, waiting, done), updated on Orca's agent status events. An agent of another workspace shows no state until Orca has reported one since the plugin started.
+- **Copy ID** button on each agent row: copies the agent's terminal handle (`term_…`) to the clipboard, to paste it into a request to another agent, in this workspace or another.
 - **Messages**: the last 20 exchanged with a terminal of this workspace. They are read with `orca orchestration inbox`, never consumed, and refreshed every 5 seconds while the panel is visible.
 - **Install status per harness**, with Install and Remove buttons.
 
@@ -75,9 +75,9 @@ Orca labels this plugin **Full access** (`trusted-worker`): it runs its own work
 
 | Capability | Why |
 | --- | --- |
-| `workspace:read` | Know the focused workspace, to list its agents and terminals. |
-| `agent:read` | Read the agents and their state. |
-| `storage:own` | Keep the install record and the panel language in the plugin's own storage. |
+| `workspace:read` | Know the focused workspace, to highlight its agents and list its messages. |
+| `agent:read` | Read the agents and their state, and be told when an agent's state changes in any workspace. |
+| `storage:own` | Keep the install record, the panel language and the last known state of each agent in the plugin's own storage. |
 
 Beyond Orca's API, the worker:
 
@@ -89,7 +89,8 @@ Beyond Orca's API, the worker:
 ## Requirements and limits
 
 - **Orca 1.4.248 or later**. macOS is the tested platform.
-- **Focused workspace only**: the panel never shows agents or messages of another workspace, and agents reach another workspace only through a handle (`term_…`) you give them.
+- **Messages of the focused workspace only**: the panel lists the agents of every workspace, but the feed covers the focused one. Agents reach another workspace only through a handle (`term_…`) you give them, which **Copy ID** provides.
+- **Local agents only**: agents on a paired Orca server or a detached (orphaned) terminal are not listed.
 - **Agents need a permissive mode**. In an "ask" permission mode, each `send`, `check` or `reply` waits for your approval.
 - **Orca prints a "live terminal-only mailbox" warning** on every send. It is expected, and the skill tells agents to ignore it.
 - **Orca 1.4.259 reports an agent waiting for input as Waiting** rather than Blocked, and the panel shows what Orca reports.
