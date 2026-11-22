@@ -76,7 +76,7 @@ Orca labels this plugin **Full access** (`trusted-worker`): it runs its own work
 | Capability | Why |
 | --- | --- |
 | `workspace:read` | Know the focused workspace, to highlight its agents and list its messages. |
-| `agent:read` | Read the agents and their state. |
+| `agent:read` | Read the agents of each workspace and their state, and refresh the panel when a state changes. |
 | `storage:own` | Keep the install record and the panel language in the plugin's own storage. |
 
 Beyond Orca's API, the worker:
@@ -93,7 +93,7 @@ Beyond Orca's API, the worker:
 - **Local agents only**: agents on a paired Orca server or a detached (orphaned) terminal are not listed.
 - **Agents need a permissive mode**. In an "ask" permission mode, each `send`, `check` or `reply` waits for your approval.
 - **Orca prints a "live terminal-only mailbox" warning** on every send. It is expected, and the skill tells agents to ignore it.
-- **Orca 1.4.259 reports an agent waiting for input as Waiting** rather than Blocked, and the panel shows what Orca reports.
+- **Orca reports an agent waiting for input as Waiting** rather than Blocked, and the panel shows what Orca reports.
 - **The feed scans the latest 200 messages of the whole Orca app**, so a busy multi-workspace Orca may show fewer than 20 messages for this workspace.
 - **A new harness** needs a new entry in `src/targets.ts`.
 
